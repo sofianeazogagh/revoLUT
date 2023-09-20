@@ -83,34 +83,34 @@ pub fn blind_push(){
     // println!("Temps moyen d'exécution blind_push : {:?}", average_time);
 
 
-    // // verification by extracting lwe 
-    // let half_box_size = ctx.box_size() / 2;
+    // verification by extracting lwe 
+    let half_box_size = ctx.box_size() / 2;
 
-    // let mut result_push: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
-    // result_push.par_extend(
-    // (0..ctx.full_message_modulus())
-    //     .into_par_iter()
-    //     .map(|i| {
-    //         let mut lwe_sample = LweCiphertext::new(0_64, ctx.big_lwe_dimension().to_lwe_size());
-    //         extract_lwe_sample_from_glwe_ciphertext(
-    //             &lut_push.lut.0,
-    //             &mut lwe_sample,
-    //             MonomialDegree((i*ctx.box_size() + half_box_size - 1) as usize),
-    //         );
-    //         // key switching
-    //         let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size());
-    //         keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
-    //         switched
-    //     }),
-    // );
+    let mut result_push: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
+    result_push.par_extend(
+    (0..ctx.full_message_modulus())
+        .into_par_iter()
+        .map(|i| {
+            let mut lwe_sample = LweCiphertext::new(0_64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+            extract_lwe_sample_from_glwe_ciphertext(
+                &lut_push.lut.0,
+                &mut lwe_sample,
+                MonomialDegree((i*ctx.box_size() + half_box_size - 1) as usize),
+            );
+            // key switching
+            let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+            keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
+            switched
+        }),
+    );
 
 
-    // let mut result_push_u64 : Vec<u64> = Vec::new();
-    // for lwe in result_push{
-    //     let pt = private_key.decrypt_lwe(&lwe, &mut ctx);
-    //     result_push_u64.push(pt);
-    // }
-    // println!("Array pushed : {:?} ",result_push_u64 );
+    let mut result_push_u64 : Vec<u64> = Vec::new();
+    for lwe in result_push{
+        let pt = private_key.decrypt_lwe(&lwe, &mut ctx);
+        result_push_u64.push(pt);
+    }
+    println!("Array pushed : {:?} ",result_push_u64 );
 
     println!("Time insertion : {:?}",duration_push);
 

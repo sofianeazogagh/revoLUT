@@ -7,11 +7,13 @@ use rayon::prelude::*;
 use tfhe::core_crypto::prelude::*;
 use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
-#[path = "./headers.rs"] mod headers;
-use self::headers::PrivateKey;
-use self::headers::PublicKey;
-use self::headers::Context;
-use self::headers::LUT;
+use revolut::*;
+
+// #[path = "./headers.rs"] mod headers;
+// use self::headers::PrivateKey;
+// use self::headers::PublicKey;
+// use self::headers::Context;
+// use self::headers::LUT;
 
 
 
@@ -130,10 +132,8 @@ pub fn blind_retrieve(){
         result = public_key.glwe_sum(&result,&many_lut[i].0);
     }
 
-    let duration_glwe_sum = start_glwe_sum.elapsed();
-    println!("Time sum the rotated glwes {:?}", duration_glwe_sum);
+    let new_lut = LUT(result);
 
-    let duration_retrieve = start_retrieve.elapsed();
 
 
     // let end_retrieve = Instant::now();
@@ -150,43 +150,52 @@ pub fn blind_retrieve(){
 
 
     // // verification by extracting lwe 
-    // let half_box_size = ctx.box_size() / 2;
-
-    // let mut result_insert: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
-    // result_insert.par_extend(
-    // (0..ctx.full_message_modulus())
-    //     .into_par_iter()
-    //     .map(|i| {
-    //         let mut lwe_sample = LweCiphertext::new(0_64, ctx.big_lwe_dimension().to_lwe_size());
-    //         extract_lwe_sample_from_glwe_ciphertext(
-    //             &result,
-    //             &mut lwe_sample,
-    //             MonomialDegree((i * ctx.box_size() + half_box_size) as usize),
-    //         );
-    //         let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size());
-    //         keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
-
-    //         // switched
-
-    //         // the result will be modulo 32
-    //         let mut output = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size());
-    //         lwe_ciphertext_sub(&mut output,&ct_16 , &switched);
-    //         output
-    //     }),
-    // );
+    // fun_name(ctx, result, public_key, ct_16, private_key);
 
 
-    // let mut result_retrieve_u64 : Vec<u64> = Vec::new();
-    // for lwe in result_insert{
-    //     let pt = private_key.decrypt_lwe(&lwe, &mut ctx);
-    //     result_retrieve_u64.push(pt);
-    // }
-    // println!("Final array : {:?} ",result_retrieve_u64 );
+    new_lut.print_in_array_format(&private_key, &ctx);
+
+    
 
 
-    println!("Time retrieve : {:?}",duration_retrieve);
+    // println!("Time retrieve : {:?}",duration_retrieve);
 
 
+}
+
+fn fun_name(mut ctx: Context, result: GlweCiphertext<Vec<u64>>, public_key: &PublicKey, ct_16: LweCiphertext<Vec<u64>>, private_key: PrivateKey) {
+    let half_box_size = ctx.box_size() / 2;
+
+    let mut result_insert: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
+    result_insert.par_extend(
+    (0..ctx.full_message_modulus())
+        .into_par_iter()
+        .map(|i| {
+            let mut lwe_sample = LweCiphertext::new(0_64, ctx.big_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+            extract_lwe_sample_from_glwe_ciphertext(
+                &result,
+                &mut lwe_sample,
+                MonomialDegree((i * ctx.box_size() + half_box_size) as usize),
+            );
+            let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+            keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
+
+            // switched
+
+            // the result will be modulo 32
+            let mut output = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+            lwe_ciphertext_sub(&mut output,&ct_16 , &switched);
+            output
+        }),
+    );
+
+
+    let mut result_retrieve_u64 : Vec<u64> = Vec::new();
+    for lwe in result_insert{
+        let pt = private_key.decrypt_lwe(&lwe, &mut ctx);
+        result_retrieve_u64.push(pt);
+    }
+    println!("Final array : {:?} ",result_retrieve_u64 );
 }
 
 fn one_lut_to_many_lut(lut: LUT, public_key: &PublicKey, ctx: &Context) -> Vec<LUT> {

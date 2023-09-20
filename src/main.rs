@@ -31,6 +31,9 @@ use crate::blind_retrieve::blind_retrieve;
 
 
 
+mod uni_test;
+use crate::uni_test::*;
+
 
 
 
@@ -45,7 +48,7 @@ mod headers;
 
 pub fn main() {
 
-    blind_array_access(); // from blind_array_access
+    // blind_array_access(); // from blind_array_access
 
     // blind_array_access2d(); // from unitest_bacc2d
 
@@ -77,6 +80,14 @@ pub fn main() {
 
 
     // gist::packing_test();
+
+
+
+    // test_blind_push();
+    // test_blind_pop();
+    // test_blind_matrix_access();
+    // test_blind_insertion();
+    // test_blind_retrieve();
 
 
 }
