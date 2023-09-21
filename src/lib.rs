@@ -553,7 +553,9 @@ impl Context {
         {
             let mut output = LweCiphertext::new(0u64, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
             programmable_bootstrap_lwe_ciphertext(&index, &mut output, &array.0, &self.fourier_bsk,);
-            return output
+            let mut switched = LweCiphertext::new(0_64, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+            keyswitch_lwe_ciphertext(&self.lwe_ksk, &output, &mut switched);
+            return switched
         }
 
         /// Get an element of a `matrix` given it `index_line` and it `index_column`
