@@ -5,11 +5,13 @@ use rayon::prelude::*;
 use tfhe::shortint::parameters::*;
 use tfhe::core_crypto::prelude::*;
 
-#[path = "./headers.rs"] mod headers;
-use self::headers::PrivateKey;
-use self::headers::PublicKey;
-use self::headers::Context;
-use self::headers::LUT;
+// #[path = "./headers.rs"] mod headers;
+// use self::headers::PrivateKey;
+// use self::headers::PublicKey;
+// use self::headers::Context;
+// use self::headers::LUT;
+
+use revolut::*;
 
     pub fn blind_array_access2d() {
 

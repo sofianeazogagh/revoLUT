@@ -11,11 +11,13 @@ use aligned_vec::ABox;
 use tfhe::core_crypto::prelude::*;
 use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
-#[path = "./headers.rs"] mod headers;
-use self::headers::PrivateKey;
-use self::headers::PublicKey;
-use self::headers::Context;
-use self::headers::LUT;
+// #[path = "./headers.rs"] mod headers;
+// use self::headers::PrivateKey;
+// use self::headers::PublicKey;
+// use self::headers::Context;
+// use self::headers::LUT;
+
+use revolut::*;
 
 
 

@@ -7,13 +7,15 @@ use rayon::prelude::*;
 use tfhe::core_crypto::prelude::*;
 use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
-#[path = "./headers.rs"] mod headers;
-use self::headers::PrivateKey;
-use self::headers::PublicKey;
-use self::headers::Context;
-use self::headers::LUT;
-use self::headers::LUTStack;
+// #[path = "./headers.rs"] mod headers;
+// use self::headers::PrivateKey;
+// use self::headers::PublicKey;
+// use self::headers::Context;
+// use self::headers::LUT;
+// use self::headers::LUTStack;
 
+
+use revolut::*;
 
 
 pub fn blind_pop(){

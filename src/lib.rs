@@ -361,6 +361,35 @@ impl Context {
 
             println!("{} {:?}", string, decoded);
         }
+
+
+        pub fn encrypt_matrix(&self,
+            mut ctx: &mut Context,
+            matrix:&Vec<Vec<u64>>
+        )->Vec<LUT>
+        {
+
+            let mut ct_matrix : Vec<LUT> = Vec::new();
+            for line in matrix{
+                let ct_line = LUT::from_vec(line,self,&mut ctx);
+                ct_matrix.push(ct_line);
+            }
+          return ct_matrix
+        }
+
+
+        pub fn decrypt_and_print_matrix(
+            &self,
+            ctx:& Context,
+            ct_matrix:&Vec<LUT>)
+        {
+            let mut result= Vec::new();
+            for i in ct_matrix{
+                let res = (*i).print(&self,&ctx);
+                result.push(res);
+            }
+            println!("{:?}", result);
+        }
     }
 
     pub struct PublicKey { // utilKey ou ServerKey ou CloudKey

@@ -6,12 +6,17 @@ use std::vec;
 use tfhe::core_crypto::prelude::*;
 use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
-#[path = "./headers.rs"] mod headers;
-use self::headers::PrivateKey;
-use self::headers::PublicKey;
-use self::headers::Context;
-use self::headers::LUT;
+// #[path = "./headers.rs"] mod headers;
+// use self::headers::PrivateKey;
+// use self::headers::PublicKey;
+// use self::headers::Context;
+// use self::headers::LUT;
 
+
+
+use revolut::*;
+
+use revolut::*;
 
 
 pub fn blind_insertion(){
@@ -85,7 +90,13 @@ pub fn blind_insertion(){
     // private_key.debug_glwe("after Sum", &result, &ctx);
 
 
+    
+
+
     let duration_insertion = start_insertion.elapsed();
+
+    let result_in_lut = LUT(result);
+    result_in_lut.print_in_array_format(&private_key, &ctx);
 
     // let end_insert = Instant::now();
     // let time_insert = end_insert - start_insertion;

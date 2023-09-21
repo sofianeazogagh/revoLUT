@@ -7,13 +7,15 @@ use rayon::prelude::*;
 use tfhe::core_crypto::prelude::*;
 use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
-#[path = "./headers.rs"] mod headers;
-use self::headers::PrivateKey;
-use self::headers::PublicKey;
-use self::headers::Context;
-use self::headers::LUT;
-use self::headers::LUTStack;
+// #[path = "./headers.rs"] mod headers;
+// use self::headers::PrivateKey;
+// use self::headers::PublicKey;
+// use self::headers::Context;
+// use self::headers::LUT;
+// use self::headers::LUTStack;
 
+
+use revolut::*;
 
 
 pub fn blind_push(){
@@ -35,7 +37,7 @@ pub fn blind_push(){
     let push_u64 = 3_u64;
 
     let lut_original_array = LUT::from_vec(&original_array, &private_key, &mut ctx);
-    let mut lut_push = LUTStack::from_lut( lut_original_array, public_key, &ctx, &private_key);
+    let mut lut_push = LUTStack::from_lut( lut_original_array, public_key, &ctx,);
     // let lut_push = LUTStack::from_vec(&original_array, &private_key, &mut ctx);
 
     let lwe_push = private_key.allocate_and_encrypt_lwe(push_u64, &mut ctx);
