@@ -107,3 +107,29 @@ pub fn test_blind_matrix_access(){
     let res = private_key.decrypt_lwe(&ct_res, &ctx);
     println!("Got {}", res);
 }
+
+
+
+
+pub fn test_blind_array_access()
+{
+    // Create Context and generate key
+    let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+    let private_key =  PrivateKey::new(&mut ctx);
+    let public_key = private_key.get_public_key();
+
+
+    // Our input message
+    let input = 3;
+    let lwe_input = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
+    
+    let array = vec![8,9,10,11,8,9,10,11];
+
+    let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+    let res = public_key.blind_array_access(&lwe_input, &lut, &ctx);
+
+
+    private_key.debug_lwe("Got ", &res, &ctx);
+    println!("Should got {}",array[3]);
+
+}

@@ -551,7 +551,7 @@ impl Context {
         /// Get an element of an `array` given it `index`
         pub fn blind_array_access(&self, index : &LweCiphertext<Vec<u64>>, array : &LUT, ctx : &Context )-> LweCiphertext<Vec<u64>>
         {
-            let mut output = LweCiphertext::new(0u64, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+            let mut output = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
             programmable_bootstrap_lwe_ciphertext(&index, &mut output, &array.0, &self.fourier_bsk,);
             let mut switched = LweCiphertext::new(0_64, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
             keyswitch_lwe_ciphertext(&self.lwe_ksk, &output, &mut switched);
