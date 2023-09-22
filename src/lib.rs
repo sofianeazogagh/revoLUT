@@ -460,6 +460,28 @@ impl Context {
             switched
         }
 
+        pub fn geq_scalar(&self,
+            ct_input: &LweCiphertext<Vec<u64>>,
+            scalar : u64,
+            ctx : &Context
+        ) -> LweCiphertext<Vec<u64>>
+        {
+
+        let cmp_scalar_accumulator = LUT::from_function(|x| (x >= scalar) as u64, ctx);
+        let mut res_cmp = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+        programmable_bootstrap_lwe_ciphertext(
+        &ct_input,
+        &mut res_cmp,
+        &cmp_scalar_accumulator.0,
+        &self.fourier_bsk,
+        );
+        let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus()
+        );
+        keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut res_cmp, &mut switched);
+
+        switched
+        }
+
         pub fn eq_scalar(&self,
                          ct_input: &LweCiphertext<Vec<u64>>,
                          scalar : u64,
@@ -542,6 +564,9 @@ impl Context {
             lwe_ciphertext_add(&mut res,&constant_lwe,lwe);
             return res
         }
+
+
+
 
 
 
@@ -1019,7 +1044,7 @@ impl Context {
             let mut ct_big = LweCiphertext::new(0_64, ctx.big_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus(), );
 
             for i in 0..ctx.message_modulus().0 { //many_lwe.len()
-                let index = (i * box_size);
+                let index = i * box_size + half_box_size;
                 extract_lwe_sample_from_glwe_ciphertext(&self.0, &mut ct_big, MonomialDegree(index));
                 input_vec.push(private_key.decrypt_lwe_big_key(&ct_big, &ctx));
             }
@@ -1029,7 +1054,7 @@ impl Context {
 
 
 
-        pub fn print_in_array_format(
+        pub fn print_in_glwe_format(
             &self,
             private_key: &PrivateKey,
             ctx: &Context, ) 
@@ -1064,10 +1089,32 @@ impl Context {
                 let pt = private_key.decrypt_lwe(&lwe, &ctx);
                 result_retrieve_u64.push(pt);
             }
-            println!("Final array : {:?} ",result_retrieve_u64 );
+            println!("{:?}",result_retrieve_u64 );
         }
 
 
+        pub fn public_rotate_right(
+            &mut self,
+            rotation : u64,
+            public_key: &PublicKey,
+            ctx : &Context
+
+
+        )
+        {
+            public_key.glwe_absorption_monic_monomial(&mut self.0, MonomialDegree(rotation as usize));
+        }
+
+        pub fn public_rotate_left(
+            &mut self,
+            rotation : usize,
+            public_key: &PublicKey,
+            ctx : &Context
+
+        )
+        {
+            public_key.glwe_absorption_monic_monomial(&mut self.0, MonomialDegree(2*ctx.polynomial_size().0 - rotation));
+        }
 
 
     }

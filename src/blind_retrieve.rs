@@ -153,7 +153,7 @@ pub fn blind_retrieve(){
     // fun_name(ctx, result, public_key, ct_16, private_key);
 
 
-    new_lut.print_in_array_format(&private_key, &ctx);
+    new_lut.print_in_glwe_format(&private_key, &ctx);
 
     
 

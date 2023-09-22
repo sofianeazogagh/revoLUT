@@ -96,7 +96,7 @@ pub fn blind_insertion(){
     let duration_insertion = start_insertion.elapsed();
 
     let result_in_lut = LUT(result);
-    result_in_lut.print_in_array_format(&private_key, &ctx);
+    result_in_lut.print_in_glwe_format(&private_key, &ctx);
 
     // let end_insert = Instant::now();
     // let time_insert = end_insert - start_insertion;

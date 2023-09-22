@@ -85,10 +85,10 @@ pub fn main() {
 
     // test_blind_push();
     // test_blind_pop();
-    // test_blind_matrix_access();
+    test_blind_matrix_access();
     // test_blind_insertion();
     // test_blind_retrieve();
-    test_blind_array_access();
+    // test_blind_array_access();
 
 
 }
