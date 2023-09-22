@@ -1036,7 +1036,7 @@ impl Context {
         {
             let box_size = ctx.polynomial_size().0 / ctx.message_modulus().0;
 
-            let half_box_size = box_size / 2;
+            // let half_box_size = box_size / 2;
 
 
             // Create the accumulator
@@ -1044,7 +1044,7 @@ impl Context {
             let mut ct_big = LweCiphertext::new(0_64, ctx.big_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus(), );
 
             for i in 0..ctx.message_modulus().0 { //many_lwe.len()
-                let index = i * box_size + half_box_size;
+                let index = i * box_size;
                 extract_lwe_sample_from_glwe_ciphertext(&self.0, &mut ct_big, MonomialDegree(index));
                 input_vec.push(private_key.decrypt_lwe_big_key(&ct_big, &ctx));
             }
