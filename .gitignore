@@ -21,3 +21,4 @@ Cargo.lock
 src/test_perf_basic_op.rs
 src/private_insert.rs
 src/gist.rs
+src/one_hot_slot.rs

@@ -345,6 +345,14 @@ impl Context {
                 ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
             println!("{} {}", string, result);
         }
+        pub fn debug_big_lwe(&self, string: &str, ciphertext: &LweCiphertext<Vec<u64>>, ctx: &Context) {
+            // Decrypt the PBS multiplication result
+            let plaintext: Plaintext<u64> =
+                decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext);
+            let result: u64 =
+                ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
+            println!("{} {}", string, result);
+        }
 
 
         pub fn debug_glwe(&self, string: &str, input_glwe: &GlweCiphertext<Vec<u64>>, ctx: &Context) {
@@ -553,7 +561,7 @@ impl Context {
                 .for_each(|(dst, &rhs)| *dst += rhs);
         }
 
-
+        // TODO : nom a changer : plaintext -> cleartext puisque Plaintext = Plaintext(cleartext)
         pub fn lwe_ciphertext_plaintext_add(&self, lwe: &LweCiphertext<Vec<u64>>, constant: u64, ctx:&Context) -> LweCiphertextOwned<u64> {
 
             let constant_plain = Plaintext(constant*ctx.delta());
@@ -562,6 +570,21 @@ impl Context {
             let mut res = LweCiphertext::new(0,ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
         
             lwe_ciphertext_add(&mut res,&constant_lwe,lwe);
+            return res
+        }
+
+
+        // TODO : nom a changer : plaintext -> cleartext puisque Plaintext = Plaintext(cleartext)
+        pub fn lwe_ciphertext_plaintext_mul(&self, lwe : &LweCiphertext<Vec<u64>>, constant: u64, ctx:&Context)
+        -> LweCiphertext<Vec<u64>>
+        {
+            // let constant_plain = Plaintext(constant*ctx.delta());
+        
+            // let constant_lwe = allocate_and_trivially_encrypt_new_lwe_ciphertext(ctx.small_lwe_dimension().to_lwe_size(),constant_plain,ctx.ciphertext_modulus());
+            let mut res = LweCiphertext::new(0,ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+
+            lwe_ciphertext_cleartext_mul(&mut res,&lwe,Cleartext(constant));
+
             return res
         }
 
@@ -809,6 +832,50 @@ impl Context {
 
         }
 
+
+        /// Get an element of a `tensor` given its `index_line` and its `index_column` ( the tensor must be encoded with encode_tensor_into_matrix)
+        pub fn blind_tensor_access(&self, ct_tensor: &Vec<LUT>, index_line: &LweCiphertext<Vec<u64>>, index_column: &LweCiphertext<Vec<u64>>,  nb_of_channels: usize, ctx: &Context)->Vec<LweCiphertext<Vec<u64>>>
+        {
+            let mut pbs_results: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
+            pbs_results.par_extend(
+                ct_tensor
+                    .into_par_iter()
+                    .map(|acc| {
+                        let mut pbs_ct = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+                        programmable_bootstrap_lwe_ciphertext(
+                            &index_column,
+                            &mut pbs_ct,
+                            &acc.0,
+                            &self.fourier_bsk,
+                        );
+                        let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+                        keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
+                        switched
+                    }),
+            );
+
+
+
+            let mut lut_column = LUT::from_vec_of_lwe(pbs_results, self, &ctx);
+
+            let index_line_encoded = self.lwe_ciphertext_plaintext_mul(&index_line, nb_of_channels as u64, &ctx); // line = line * nb_of_channel
+            let index_line_encoded = self.lwe_ciphertext_plaintext_add(&index_line_encoded, ctx.full_message_modulus() as u64, &ctx); // line = msg_mod + line \in [16,32] for 4_0
+
+            blind_rotate_assign(&index_line_encoded, &mut lut_column.0, &self.fourier_bsk);
+
+            let mut outputs_channels: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
+            for channel in 0..nb_of_channels{
+
+                let mut ct_res = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+                extract_lwe_sample_from_glwe_ciphertext(&lut_column.0, &mut ct_res, MonomialDegree(0  +channel*ctx.box_size() as usize));
+                let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+                keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut switched);
+                outputs_channels.push(switched);
+
+            }
+
+            outputs_channels
+        }
 
 
 

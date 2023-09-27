@@ -35,7 +35,12 @@ mod uni_test;
 use crate::uni_test::*;
 
 
+// mod blind_sort;
+// use crate::blind_sort::*;
 
+
+mod blind_tensor_access;
+use blind_tensor_access::*;
 
 // mod demultiplexer;
 // use crate::demultiplexer::demultiplixer;
@@ -47,6 +52,8 @@ use crate::uni_test::*;
 // mod headers;
 
 pub fn main() {
+
+    test_blind_tensor_access();
 
     // blind_array_access(); // from blind_array_access
 
@@ -85,10 +92,14 @@ pub fn main() {
 
     // test_blind_push();
     // test_blind_pop();
-    test_blind_matrix_access();
+    // test_blind_matrix_access();
     // test_blind_insertion();
     // test_blind_retrieve();
     // test_blind_array_access();
+
+
+
+
 
 
 }
