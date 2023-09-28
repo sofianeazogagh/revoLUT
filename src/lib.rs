@@ -385,6 +385,25 @@ impl Context {
           return ct_matrix
         }
 
+        pub fn encrypt_matrix_with_padding(&self,
+            mut ctx: &mut Context,
+            matrix:&Vec<Vec<u64>>
+        )->Vec<LUT>
+        {
+
+            let mut ct_matrix : Vec<LUT> = Vec::new();
+
+            for line in matrix{
+                let ct_line = LUT::from_vec(line,self,&mut ctx);
+                ct_matrix.push(ct_line);
+            }
+            for i in ct_matrix.len()..ctx.message_modulus().0{
+                let ct_padding = LUT::from_vec(&vec![0u64], self, &mut ctx);   
+                ct_matrix.push(ct_padding);
+            }
+          return ct_matrix
+        }
+
 
         pub fn decrypt_and_print_matrix(
             &self,
@@ -641,7 +660,40 @@ impl Context {
             return output
         }
 
+        /// Get an element of a `matrix` given it `index_line` and it `index_column`
+        // pub fn blind_matrix_access_fully_oblivious(&self, matrix : &Vec<LUT>, index_line : &LweCiphertext<Vec<u64>>, index_column : &LweCiphertext<Vec<u64>>, ctx : &Context)-> LweCiphertext<Vec<u64>>
+        // {
+        //     let mut output = LweCiphertext::new(0u64, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
 
+        //     // multi blind array access 
+        //     let mut pbs_results: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
+        //     pbs_results.par_extend(
+        //     matrix
+        //         .into_par_iter()
+        //         .map(|acc| {
+        //             let mut pbs_ct = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+        //             programmable_bootstrap_lwe_ciphertext(
+        //                 &index_column,
+        //                 &mut pbs_ct,
+        //                 &acc.0,
+        //                 &self.fourier_bsk,
+        //             );
+        //             let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+        //             keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
+        //             switched
+        //         }),
+        //     );
+
+        //     let index_line_encoded = self.lwe_ciphertext_plaintext_add(&index_line, ctx.full_message_modulus() as u64, &ctx);
+
+        //     // pack all the lwe
+        //     let accumulator_final = LUT::from_vec_of_lwe_with_padding(pbs_results, self, &ctx);
+        //     // final blind array access
+        //     let mut ct_res = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+        //     programmable_bootstrap_lwe_ciphertext(&index_line_encoded, &mut ct_res, &accumulator_final.0, &self.fourier_bsk,);
+        //     keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut output);
+        //     return output
+        // }
 
         /// Insert an `element` in a `lut` at `index` and return the modified lut (très très sensible et pas très robuste...)
         pub fn blind_insertion(&self, lut: LUT, index: LweCiphertext<Vec<u64>>, element : &LweCiphertext<Vec<u64>>,  ctx: &Context, private_key: &PrivateKey) -> LUT{
@@ -1019,6 +1071,61 @@ impl Context {
 
 
             LUT(glwe)
+        }
+
+
+
+        fn add_redundancy_many_lwe_with_padding(many_lwe : Vec<LweCiphertext<Vec<u64>>>, public_key : &PublicKey, ctx : &Context) -> Vec<LweCiphertext<Vec<u64>>>{
+
+            let box_size = ctx.polynomial_size().0 / ctx.full_message_modulus();
+            // Create the vector which will contain the redundant lwe
+            let mut redundant_many_lwe : Vec<LweCiphertext<Vec<u64>>> = Vec::new();
+            let ct_0 = LweCiphertext::new(0_64, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+    
+            let size_many_lwe = many_lwe.len();
+            // Fill each box with the encoded denoised value
+            for i in 0..size_many_lwe{ 
+                let index = i * box_size;
+                for _j in index..index + box_size {
+                        redundant_many_lwe.push(many_lwe[i].clone());
+                }
+            }
+    
+            let half_box_size = box_size / 2;
+    
+            // Negate the first half_box_size coefficients to manage negacyclicity and rotate
+            for a_i in redundant_many_lwe[0..half_box_size].iter_mut() {
+                public_key.wrapping_neg_lwe(a_i);
+            }
+            redundant_many_lwe.resize(ctx.full_message_modulus()*box_size, ct_0);
+            redundant_many_lwe.rotate_left(half_box_size);
+            redundant_many_lwe
+            
+        }
+    
+    
+        pub fn from_vec_of_lwe_with_padding(many_lwe : Vec<LweCiphertext<Vec<u64>>>, public_key : &PublicKey, ctx : &Context) -> LUT{
+    
+        let many_lwe_as_accumulator = Self::add_redundancy_many_lwe_with_padding(many_lwe, public_key, ctx);
+        let mut lwe_container : Vec<u64> = Vec::new();
+        for ct in many_lwe_as_accumulator{
+            let mut lwe = ct.into_container();
+            lwe_container.append(&mut lwe);
+        }
+        let lwe_ciphertext_list =  LweCiphertextList::from_container(lwe_container,ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+    
+        // Prepare our output GLWE in which we pack our LWEs
+        let mut glwe = GlweCiphertext::new(0, ctx.glwe_dimension().to_glwe_size(), ctx.polynomial_size(),ctx.ciphertext_modulus());
+        
+    
+        // Keyswitch and pack
+        private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+            &public_key.pfpksk,
+            &mut glwe,
+            &lwe_ciphertext_list,
+        );
+        LUT(glwe)
+    
         }
 
 
