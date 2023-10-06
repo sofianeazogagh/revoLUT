@@ -311,23 +311,20 @@ pub fn eval_perf() {
 
                 let matrix = generate_matrix(n, m, ctx.full_message_modulus() as u64);
 
-                let ct_matrix = private_key.encrypt_matrix(&mut ctx, &matrix);
-                let ct_matrix_with_padding = private_key.encrypt_matrix_with_padding(&mut ctx, &matrix);
-        
+                let ct_matrix = private_key.encrypt_matrix(&mut ctx, &matrix);        
 
                 let num_iterations = 100;
                 for execution in 0..num_iterations {
 
 
                     // Temps d'exécution de ce qu'on veut évaluer
-                    let start_time_bmawp= Instant::now();
-                    let ct_1 = public_key.blind_matrix_access(&ct_matrix_with_padding, &index_line, &index_column, &ctx);
-                    let elapsed_time_bmawp = start_time_bmawp.elapsed();
+                    let start_time= Instant::now();
+                    let ct_1 = public_key.blind_matrix_access(&ct_matrix, &index_line, &index_column, &ctx);
+                    let elapsed_time = start_time.elapsed();
                     
 
                     // Écrire les temps dans le fichier
-                    writeln!(output_file_bma, "{:?},{:?},{:?},{:?}",execution,n,params.message_modulus.0,elapsed_time_bma.as_millis()).expect("Impossible d'écrire dans le fichier");
-                    writeln!(output_file_bmawp, "{:?},{:?},{:?},{:?}",execution,n,params.message_modulus.0,elapsed_time_bmawp.as_millis()).expect("Impossible d'écrire dans le fichier");
+                    writeln!(output_file, "{:?},{:?},{:?},{:?}",execution,n,params.message_modulus.0,elapsed_time.as_millis()).expect("Impossible d'écrire dans le fichier");
 
                 }
         }
