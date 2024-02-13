@@ -32,7 +32,7 @@ pub fn blind_retrieve(){
 
    
     let mut original_array = vec![2,4,9,6];
-    original_array.resize(ctx.full_message_modulus(),0);
+    original_array.resize(ctx.full_message_modulus,0);
 
     println!("Original array : {:?} ",original_array );
     let index_retrieve_u64 = 2u64;
@@ -40,12 +40,12 @@ pub fn blind_retrieve(){
 
     let mut lut_original_array = LUT::from_vec(&original_array, &private_key, &mut ctx);
     let index_retrieve = private_key.allocate_and_encrypt_lwe(index_retrieve_u64, &mut ctx);
-    let mut big_lwe = LweCiphertext::new(0_64, ctx.big_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
-    let mut lwe_retrieve = LweCiphertext::new(0_64, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+    let mut big_lwe = LweCiphertext::new(0_64, ctx.big_lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
+    let mut lwe_retrieve = LweCiphertext::new(0_64, ctx.parameters.lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
 
 
-    let mut ct_16 = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
-    trivially_encrypt_lwe_ciphertext(&mut ct_16, Plaintext(ctx.full_message_modulus() as u64));
+    let mut ct_16 = LweCiphertext::new(0, ctx.parameters.lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
+    trivially_encrypt_lwe_ciphertext(&mut ct_16, Plaintext(ctx.full_message_modulus as u64));
 
     let start_retrieve = Instant::now();
 
@@ -96,7 +96,7 @@ pub fn blind_retrieve(){
         let ct_cp = leq_scalar(&index_retrieve, original_index as u64, public_key, &ctx);
         // private_key.debug_lwe("ct_cp = ", &ct_cp, &ctx);
         let ct_original_index = public_key.allocate_and_trivially_encrypt_lwe(original_index as u64, &mut ctx);
-        let mut ct_new_index = LweCiphertext::new(0_u64, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+        let mut ct_new_index = LweCiphertext::new(0_u64, ctx.parameters.lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
         // println!("original_index {}",original_index);
         lwe_ciphertext_sub(&mut ct_new_index, &ct_original_index, &ct_cp); // new index = original_index - ct_cp
         // private_key.debug_lwe("ct_new_index", &ct_new_index, &ctx);
@@ -114,7 +114,7 @@ pub fn blind_retrieve(){
 
     let start_multi_br = Instant::now();
     for (lut,index) in many_lut.iter_mut().zip(new_index.iter()){
-        let mut rotation = LweCiphertext::new(0_64,ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+        let mut rotation = LweCiphertext::new(0_64,ctx.parameters.lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
         lwe_ciphertext_sub(&mut rotation, &ct_16, index); // rotation = 16 - index = - index
         blind_rotate_assign(&rotation, &mut lut.0, &public_key.fourier_bsk);
     }
@@ -164,26 +164,26 @@ pub fn blind_retrieve(){
 }
 
 fn fun_name(mut ctx: Context, result: GlweCiphertext<Vec<u64>>, public_key: &PublicKey, ct_16: LweCiphertext<Vec<u64>>, private_key: PrivateKey) {
-    let half_box_size = ctx.box_size() / 2;
+    let half_box_size = ctx.box_size / 2;
 
     let mut result_insert: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
     result_insert.par_extend(
-    (0..ctx.full_message_modulus())
+    (0..ctx.full_message_modulus)
         .into_par_iter()
         .map(|i| {
-            let mut lwe_sample = LweCiphertext::new(0_64, ctx.big_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+            let mut lwe_sample = LweCiphertext::new(0_64, ctx.big_lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
             extract_lwe_sample_from_glwe_ciphertext(
                 &result,
                 &mut lwe_sample,
-                MonomialDegree((i * ctx.box_size() + half_box_size) as usize),
+                MonomialDegree((i * ctx.box_size + half_box_size) as usize),
             );
-            let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+            let mut switched = LweCiphertext::new(0, ctx.parameters.lwe_dimension.to_lwe_size(),ctx.ciphertext_modulus);
             keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
 
             // switched
 
             // the result will be modulo 32
-            let mut output = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+            let mut output = LweCiphertext::new(0, ctx.parameters.lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
             lwe_ciphertext_sub(&mut output,&ct_16 , &switched);
             output
         }),
@@ -204,7 +204,7 @@ fn one_lut_to_many_lut(lut: LUT, public_key: &PublicKey, ctx: &Context) -> Vec<L
     // Many-Lwe to Many-Glwe
     let mut many_glwe : Vec<LUT> = Vec::new();
     for lwe in many_lwe{
-        let mut glwe = GlweCiphertext::new(0_u64,ctx.glwe_dimension().to_glwe_size(),ctx.polynomial_size(), ctx.ciphertext_modulus());
+        let mut glwe = GlweCiphertext::new(0_u64,ctx.parameters.glwe_dimension().to_glwe_size(),ctx.parameters.polynomial_size, ctx.ciphertext_modulus);
         let redundancy_lwe = one_lwe_to_lwe_ciphertext_list(lwe, ctx);
         private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
@@ -232,10 +232,10 @@ fn one_lwe_to_lwe_ciphertext_list(
     // box, which manages redundancy to yield a denoised value for several noisy values around
     // a true input value.
 
-    let redundant_lwe = vec![input_lwe.into_container();ctx.box_size()].concat();
+    let redundant_lwe = vec![input_lwe.into_container();ctx.box_size].concat();
     let lwe_ciphertext_list =  LweCiphertextList::from_container(
         redundant_lwe,
-        ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+        ctx.parameters.lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
     
 
     lwe_ciphertext_list
@@ -255,14 +255,14 @@ pub fn leq_scalar(
 {
 
     let cmp_scalar_accumulator = LUT::from_function(|x| (x <= scalar as u64) as u64, ctx);
-    let mut res_cmp = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+    let mut res_cmp = LweCiphertext::new(0u64, ctx.big_lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
     programmable_bootstrap_lwe_ciphertext(
         &ct_input,
         &mut res_cmp,
         &cmp_scalar_accumulator.0,
         &public_key.fourier_bsk,
     );
-    let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+    let mut switched = LweCiphertext::new(0, ctx.parameters.lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
     keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut res_cmp, &mut switched);
 
     switched

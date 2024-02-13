@@ -22,4 +22,8 @@ rustup override set nightly
 cargo build
 ```
 
+## Caching keys
 
+```bash
+cargo test --release test_keygen -- --nocapture
+```

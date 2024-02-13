@@ -132,7 +132,7 @@ pub fn test_blind_array_access()
     // // testing a solution to manage input > 16
     // let cp = public_key.geq_scalar(&lwe_input, 8, &ctx); // cp =[index > 16]
     // private_key.debug_lwe("cp ", &cp, &ctx);
-    // let mut ct_16_or_0 = LweCiphertext::new(0_64, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
+    // let mut ct_16_or_0 = LweCiphertext::new(0_64, ctx.parameters.lwe_dimension.to_lwe_size(), ctx.ciphertext_modulus);
     // lwe_ciphertext_cleartext_mul(&mut ct_16_or_0, &cp, Cleartext(16));
     // private_key.debug_lwe("cp*16 ", &ct_16_or_0, &ctx);
     // lwe_ciphertext_sub_assign(&mut lwe_input, &ct_16_or_0);

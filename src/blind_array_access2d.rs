@@ -30,7 +30,7 @@ use revolut::*;
         // Our input message
         let column = 4u64;
         let line = 0;
-        // let line_encoded = ctx.full_message_modulus() + line;
+        // let line_encoded = ctx.full_message_modulus + line;
         let line_encoded = line;
 
         // let line = 1u64;
@@ -121,14 +121,14 @@ use revolut::*;
             array2d
                 .into_par_iter()
                 .map(|acc| {
-                    let mut pbs_ct = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+                    let mut pbs_ct = LweCiphertext::new(0u64, ctx.big_lwe_dimension.to_lwe_size(),ctx.ciphertext_modulus);
                     programmable_bootstrap_lwe_ciphertext(
                         &lwe_column,
                         &mut pbs_ct,
                         &acc.0,
                         &public_key.fourier_bsk,
                     );
-                    let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+                    let mut switched = LweCiphertext::new(0, ctx.parameters.lwe_dimension.to_lwe_size(),ctx.ciphertext_modulus);
                     keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut pbs_ct, &mut switched);
                     switched
                 }),
@@ -144,7 +144,7 @@ use revolut::*;
         let duration_packing = start_packing.elapsed();
         println!(" Temps Packing : {:?}", duration_packing);
         //////////////////// FINAL PBS ////////////////////////
-        let mut ct_res = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+        let mut ct_res = LweCiphertext::new(0u64, ctx.big_lwe_dimension.to_lwe_size(),ctx.ciphertext_modulus);
         programmable_bootstrap_lwe_ciphertext(&lwe_line, &mut ct_res, &accumulator_final.0, &public_key.fourier_bsk, );
         ct_res
     }
