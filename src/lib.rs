@@ -6,7 +6,12 @@ pub mod public_key;
 mod blind_sort;
 
 #[cfg(test)]
+fn debug_key() -> &'static private_key::PrivateKey {
+    static PRIVATE_KEY: std::sync::OnceLock<private_key::PrivateKey> = std::sync::OnceLock::new();
+    PRIVATE_KEY.get_or_init(|| private_key::PrivateKey::from_file("PrivateKey2"))
+}
 
+#[cfg(test)]
 mod test {
     use crate::context::Context;
     use crate::lut::{LUTStack, LUT};
@@ -124,20 +129,23 @@ mod test {
     #[test]
     fn test_blind_permutation() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::from_file("PrivateKey");
+        let private_key = PrivateKey::from_file("PrivateKey4");
 
         let cipher_array = vec![1, 2, 3, 4];
-        let lut = LUT::from_vec(&cipher_array, &private_key, &mut ctx);
 
-        // blind_permutation
-        let cipher_perm = private_key.encrypt_permutation(vec![1, 0, 3, 2], &mut ctx);
-        let cipher_permuted_array =
-            private_key
-                .public_key
-                .blind_permutation(lut, cipher_perm, &ctx);
+        for _ in 0..10 {
+            // blind_permutation
+            let lut = LUT::from_vec(&cipher_array, &private_key, &mut ctx);
+            let cipher_perm = private_key.encrypt_permutation(vec![1, 0, 3, 2], &mut ctx);
+            let cipher_permuted_array =
+                private_key
+                    .public_key
+                    .blind_permutation(lut, cipher_perm, &ctx);
 
-        assert!(private_key
-            .decrypt_lut(&cipher_permuted_array, &ctx)
-            .starts_with(&[2, 1, 4, 3]));
+            private_key.print_lut(&cipher_permuted_array, &ctx);
+            assert!(private_key
+                .decrypt_lut(&cipher_permuted_array, &ctx)
+                .starts_with(&[2, 1, 4, 3]));
+        }
     }
 }
