@@ -7,9 +7,7 @@ edition = "2021"
 
 [dependencies]
 
-tfhe = { version = "0.3.1", features = [ "boolean", "shortint", "integer", "aarch64-unix" ] }
-serde = { version = "1.0", features = ["derive"] }
-bincode = "1.3.3"
+tfhe = { version = "0.3.1", features = [ "boolean", "shortint", "aarch64-unix" ] }
 num-complex = "0.4.0"
 arrayvec = "0.7.2"
 aligned-vec = "0.5.0"

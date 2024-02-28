@@ -80,14 +80,14 @@ fn blind_tensor_access(public_key: &PublicKey, ct_tensor: &Vec<LUT>, lwe_line: &
         ct_tensor
             .into_par_iter()
             .map(|acc| {
-                let mut pbs_ct = LweCiphertext::new(0u64, ctx.big_lwe_dimension.to_lwe_size(),ctx.ciphertext_modulus);
+                let mut pbs_ct = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
                 programmable_bootstrap_lwe_ciphertext(
                     &lwe_column,
                     &mut pbs_ct,
                     &acc.0,
                     &public_key.fourier_bsk,
                 );
-                let mut switched = LweCiphertext::new(0, ctx.parameters.lwe_dimension.to_lwe_size(),ctx.ciphertext_modulus);
+                let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
                 keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut pbs_ct, &mut switched);
                 switched
             }),
@@ -99,7 +99,7 @@ fn blind_tensor_access(public_key: &PublicKey, ct_tensor: &Vec<LUT>, lwe_line: &
 
     let index_line_encoded = public_key.lwe_ciphertext_plaintext_mul(&lwe_line, nb_of_channels as u64, &ctx);
     // line = line * nb_of_channel
-    let index_line_encoded = public_key.lwe_ciphertext_plaintext_add(&index_line_encoded, ctx.full_message_modulus as u64, &ctx);
+    let index_line_encoded = public_key.lwe_ciphertext_plaintext_add(&index_line_encoded, ctx.full_message_modulus() as u64, &ctx);
     // line = msg_mod + line \in [16,32] for 4_0
 
     blind_rotate_assign(&index_line_encoded, &mut lut_column.0, &public_key.fourier_bsk);
@@ -107,9 +107,9 @@ fn blind_tensor_access(public_key: &PublicKey, ct_tensor: &Vec<LUT>, lwe_line: &
     let mut outputs_channels: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
     for channel in 0..nb_of_channels{
 
-        let mut ct_res = LweCiphertext::new(0u64, ctx.big_lwe_dimension.to_lwe_size(),ctx.ciphertext_modulus);
-        extract_lwe_sample_from_glwe_ciphertext(&lut_column.0, &mut ct_res, MonomialDegree(0  +channel*ctx.box_size as usize));
-        let mut switched = LweCiphertext::new(0, ctx.parameters.lwe_dimension.to_lwe_size(),ctx.ciphertext_modulus);
+        let mut ct_res = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
+        extract_lwe_sample_from_glwe_ciphertext(&lut_column.0, &mut ct_res, MonomialDegree(0  +channel*ctx.box_size() as usize));
+        let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
         keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut ct_res, &mut switched);
         outputs_channels.push(switched);
 
