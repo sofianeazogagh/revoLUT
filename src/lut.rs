@@ -5,6 +5,7 @@ use tfhe::{
             extract_lwe_sample_from_glwe_ciphertext, keyswitch_lwe_ciphertext,
             lwe_ciphertext_sub_assign,
             private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext,
+            trivially_encrypt_glwe_ciphertext,
         },
         commons::parameters::MonomialDegree,
         entities::{GlweCiphertext, LweCiphertext, LweCiphertextList, PlaintextList},
@@ -346,6 +347,28 @@ impl LUT {
             .zip(self.0.as_ref().iter().zip(lut_r.0.as_ref().iter()))
             .for_each(|(dst, (&lhs, &rhs))| *dst = lhs + rhs);
         return LUT(res);
+    }
+
+    pub fn print(&self, private_key: &PrivateKey, ctx: &Context) {
+        let box_size = ctx.parameters.polynomial_size.0 / ctx.parameters.message_modulus.0;
+
+        // let half_box_size = box_size / 2;
+
+        // Create the accumulator
+        let mut input_vec = Vec::new();
+        let mut ct_big = LweCiphertext::new(
+            0_64,
+            ctx.big_lwe_dimension.to_lwe_size(),
+            ctx.ciphertext_modulus,
+        );
+
+        for i in 0..ctx.parameters.message_modulus.0 {
+            //many_lwe.len()
+            let index = i * box_size;
+            extract_lwe_sample_from_glwe_ciphertext(&self.0, &mut ct_big, MonomialDegree(index));
+            input_vec.push(private_key.decrypt_lwe_big_key(&ct_big, &ctx));
+        }
+        println!("{:?}", input_vec);
     }
 
     pub fn print_in_glwe_format(&self, private_key: &PrivateKey, ctx: &Context) {

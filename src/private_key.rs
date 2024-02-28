@@ -435,31 +435,9 @@ impl PrivateKey {
     pub fn decrypt_and_print_matrix(&self, ctx: &Context, ct_matrix: &Vec<LUT>) {
         let mut result = Vec::new();
         for i in ct_matrix {
-            let res = self.print_lut(i, &ctx);
+            let res = (*i).print(&self, &ctx);
             result.push(res);
         }
         println!("{:?}", result);
-    }
-
-    pub fn print_lut(&self, lut: &LUT, ctx: &Context) {
-        let box_size = ctx.parameters.polynomial_size.0 / ctx.parameters.message_modulus.0;
-
-        // let half_box_size = box_size / 2;
-
-        // Create the accumulator
-        let mut input_vec: Vec<u64> = Vec::new();
-        let mut ct_big = LweCiphertext::new(
-            0_64,
-            ctx.big_lwe_dimension.to_lwe_size(),
-            ctx.ciphertext_modulus,
-        );
-
-        for i in 0..ctx.parameters.message_modulus.0 {
-            //many_lwe.len()
-            let index = i * box_size;
-            extract_lwe_sample_from_glwe_ciphertext(&lut.0, &mut ct_big, MonomialDegree(index));
-            input_vec.push(self.decrypt_lwe_big_key(&ct_big, &ctx));
-        }
-        println!("{:?}", input_vec);
     }
 }
