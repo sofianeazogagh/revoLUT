@@ -1,4 +1,4 @@
-use std::time::Duration;
+
 use std::time::Instant;
 use rayon::prelude::*;
 
@@ -78,7 +78,7 @@ use revolut::*;
             vec_of_lut.push(lut);
         }
 
-        let start_bacc2d = Instant::now();
+        let _start_bacc2d = Instant::now();
         let ct_res = bacc2d(
             vec_of_lut,
             lwe_columns,

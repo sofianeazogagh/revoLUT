@@ -1,4 +1,4 @@
-use std::time::Duration;
+
 use std::time::Instant;
 use std::vec;
 
@@ -47,7 +47,7 @@ pub fn blind_retrieve(){
     let mut ct_16 = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
     trivially_encrypt_lwe_ciphertext(&mut ct_16, Plaintext(ctx.full_message_modulus() as u64));
 
-    let start_retrieve = Instant::now();
+    let _start_retrieve = Instant::now();
 
     // Delete the retrieved element from the lut
     
@@ -125,7 +125,7 @@ pub fn blind_retrieve(){
 
     // Sum all the rotated glwe to get the final glwe retrieved
 
-    let start_glwe_sum = Instant::now();
+    let _start_glwe_sum = Instant::now();
 
     let mut result = many_lut[0].0.clone();
     for i in 1..many_lut.len(){

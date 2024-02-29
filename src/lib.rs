@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use aligned_vec::ABox;
 use num_complex::Complex;
 use rayon::prelude::*;
@@ -139,15 +137,6 @@ pub struct PrivateKey {
 
 impl PrivateKey {
     /// Generate a PrivateKey which contain also the PublicKey
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// // Generate the keys and get them in different variables:
-    /// let mut ctx = Context::new(PARAM_MESSAGE_2_CARRY_2)
-    /// let private_key = PrivateKey::new(&ctx);
-    /// ```
-    ///
     pub fn new(ctx: &mut Context) -> PrivateKey {
         // Generate an LweSecretKey with binary coefficients
         let small_lwe_sk =
@@ -482,7 +471,7 @@ impl PrivateKey {
             let ct_line = LUT::from_vec(line, self, &mut ctx);
             ct_matrix.push(ct_line);
         }
-        for i in ct_matrix.len()..ctx.message_modulus().0 {
+        for _i in ct_matrix.len()..ctx.message_modulus().0 {
             let ct_padding = LUT::from_vec(&vec![0u64], self, &mut ctx);
             ct_matrix.push(ct_padding);
         }
@@ -902,7 +891,7 @@ impl PublicKey {
         &self,
         lut: LUT,
         permutation: Vec<LweCiphertext<Vec<u64>>>,
-        ctx: &Context,
+        ctx: Context,
     ) -> LUT {
         let mut many_lut = lut.to_many_lut(&self, &ctx);
         // Multi Blind Rotate

@@ -1,4 +1,4 @@
-use std::time::Duration;
+
 use std::time::Instant;
 use std::vec;
 
@@ -16,7 +16,7 @@ use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
 use revolut::*;
 
-use revolut::*;
+
 
 
 pub fn blind_insertion(){

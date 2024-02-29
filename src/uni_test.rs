@@ -2,18 +2,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use revolut::*;
-use tfhe::{
-    core_crypto::prelude::{
-        lwe_ciphertext_cleartext_mul, lwe_ciphertext_sub_assign, Cleartext, LweCiphertext,
-    },
-    shortint::parameters::*,
-};
-
-use std::fs::File;
-use std::io::Write;
-
-use rand::prelude::*;
-use std::collections::HashSet;
+use tfhe::shortint::parameters::*;
 
 pub fn test_blind_retrieve() {
     let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
