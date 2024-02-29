@@ -45,7 +45,7 @@ pub fn main() {
     // test_blind_insertion();
     // test_blind_retrieve();
     // test_blind_array_access();
-    test_blind_permutation();
+    // test_blind_permutation();
 
     /* From perf_test */
     // compare_performance_bma_bmawp();

@@ -891,7 +891,7 @@ impl PublicKey {
         &self,
         lut: LUT,
         permutation: Vec<LweCiphertext<Vec<u64>>>,
-        ctx: Context,
+        ctx: &Context,
     ) -> LUT {
         let mut many_lut = lut.to_many_lut(&self, &ctx);
         // Multi Blind Rotate

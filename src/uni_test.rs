@@ -1,7 +1,10 @@
+use rand::Rng;
+use std::collections::HashSet;
 use std::time::Duration;
 use std::time::Instant;
 
 use revolut::*;
+use tfhe::core_crypto::prelude::*;
 use tfhe::shortint::parameters::*;
 
 pub fn test_blind_retrieve() {
@@ -155,7 +158,7 @@ pub fn test_blind_permutation() {
 
         let permutation_index: Vec<u64> = unique_values.into_iter().collect();
 
-        let mut target: Vec<u64> = vec![0; ctx.full_message_modulus() as usize];
+        let mut target: Vec<u64> = vec![0; vector_size];
         for i in 0..array.len() {
             target[permutation_index[i] as usize] = array[i];
         }
