@@ -29,9 +29,25 @@ fn cmp_matrix(ctx: &Context) -> &'static Vec<LUT> {
 }
 
 #[cfg(test)]
-fn debug_key() -> &'static PrivateKey {
-    static PRIVATE_KEY: std::sync::OnceLock<PrivateKey> = std::sync::OnceLock::new();
-    PRIVATE_KEY.get_or_init(|| PrivateKey::from_file("PrivateKey2"))
+fn key2() -> &'static PrivateKey {
+    use tfhe::shortint::parameters::PARAM_MESSAGE_2_CARRY_0;
+
+    static PRIVATE_KEY2: std::sync::OnceLock<PrivateKey> = std::sync::OnceLock::new();
+    PRIVATE_KEY2.get_or_init(|| {
+        PrivateKey::from_file("PrivateKey2")
+            .unwrap_or(PrivateKey::new(&mut Context::from(PARAM_MESSAGE_2_CARRY_0)))
+    })
+}
+
+#[cfg(test)]
+fn key4() -> &'static PrivateKey {
+    use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
+
+    static PRIVATE_KEY2: std::sync::OnceLock<PrivateKey> = std::sync::OnceLock::new();
+    PRIVATE_KEY2.get_or_init(|| {
+        PrivateKey::from_file("PrivateKey4")
+            .unwrap_or(PrivateKey::new(&mut Context::from(PARAM_MESSAGE_4_CARRY_0)))
+    })
 }
 
 pub struct Context {
@@ -278,11 +294,10 @@ impl PrivateKey {
     }
 
     /// Load a private key from a file instead of generating it
-    pub fn from_file(path: &str) -> PrivateKey {
+    pub fn from_file(path: &str) -> Option<PrivateKey> {
         fs::read(path)
             .ok()
             .and_then(|buf| bincode::deserialize(&buf).ok())
-            .unwrap()
     }
 
     // getters for each attribute
@@ -1212,7 +1227,7 @@ impl PublicKey {
                 let res = self.blind_lt(&a, &b, ctx);
                 #[cfg(test)]
                 {
-                    let private_key = debug_key();
+                    let private_key = key2();
                     let d_a = private_key.decrypt_lwe(&a, ctx);
                     let d_b = private_key.decrypt_lwe(&b, ctx);
                     let d_res = private_key.decrypt_lwe(&res, ctx);
@@ -1226,7 +1241,7 @@ impl PublicKey {
 
         #[cfg(test)]
         {
-            let private_key = debug_key();
+            let private_key = key2();
             let decrypted: Vec<u64> = (0..n)
                 .map(|i| private_key.decrypt_lwe(&permutation[i], ctx))
                 .collect();
@@ -1791,7 +1806,7 @@ mod test {
     #[test]
     fn test_lwe_enc() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let input: u64 = 3;
         let lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
         let clear = private_key.decrypt_lwe(&lwe, &mut ctx);
@@ -1802,7 +1817,7 @@ mod test {
     #[test]
     fn test_lut_enc() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let array = vec![0, 1, 2, 3, 4];
         let _lut = LUT::from_vec(&array, &private_key, &mut ctx);
     }
@@ -1810,7 +1825,7 @@ mod test {
     #[test]
     fn test_neg_lwe() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let public_key = &private_key.public_key;
         let input: u64 = 3;
         let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
@@ -1824,7 +1839,7 @@ mod test {
     #[test]
     fn test_neg_lwe_assign() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let public_key = &private_key.public_key;
         let input: u64 = 3;
         let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
@@ -1855,7 +1870,7 @@ mod test {
     #[test]
     fn test_lwe_to_lut() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let public_key = &private_key.public_key;
         let our_input = 8u64;
         let lwe = private_key.allocate_and_encrypt_lwe(our_input, &mut ctx);
@@ -1869,7 +1884,7 @@ mod test {
 
     fn test_eq_scalar() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let public_key = &private_key.get_public_key();
         let our_input = 0u64;
         let lwe = private_key.allocate_and_encrypt_lwe(our_input, &mut ctx);
@@ -1884,7 +1899,7 @@ mod test {
     #[test]
     fn test_lut_stack_from_lut() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let public_key = &private_key.public_key;
         let array = vec![2, 1, 2, 3, 4];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
@@ -1897,7 +1912,7 @@ mod test {
     #[test]
     fn test_blind_lt() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key2();
         let public_key = &private_key.public_key;
 
         for a in 0..ctx.message_modulus().0 {
@@ -1915,7 +1930,7 @@ mod test {
     #[test]
     fn test_blind_sort_bma() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = debug_key();
+        let private_key = key2();
         let public_key = &private_key.public_key;
         let array = vec![1, 3, 2, 0];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
