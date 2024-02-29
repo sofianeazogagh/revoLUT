@@ -278,7 +278,7 @@ impl PrivateKey {
     }
 
     /// Load a private key from a file instead of generating it
-    fn from_file(path: &str) -> PrivateKey {
+    pub fn from_file(path: &str) -> PrivateKey {
         fs::read(path)
             .ok()
             .and_then(|buf| bincode::deserialize(&buf).ok())
@@ -1915,7 +1915,7 @@ mod test {
     #[test]
     fn test_blind_sort_bma() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = debug_key();
         let public_key = &private_key.public_key;
         let array = vec![1, 3, 2, 0];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
