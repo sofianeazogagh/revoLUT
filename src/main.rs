@@ -1,26 +1,26 @@
 // #![allow(dead_code)]
 // #![allow(unused_variables)]
 
-mod blind_array_access;
-use crate::blind_array_access::blind_array_access;
+// mod blind_array_access;
+// use crate::blind_array_access::blind_array_access;
 
-mod blind_array_access2d;
-use crate::blind_array_access2d::blind_array_access2d;
+// mod blind_array_access2d;
+// use crate::blind_array_access2d::blind_array_access2d;
 
-mod blind_permutation;
-use crate::blind_permutation::blind_permutation;
+// mod blind_permutation;
+// use crate::blind_permutation::blind_permutation;
 
-mod blind_insertion;
-use crate::blind_insertion::blind_insertion;
+// mod blind_insertion;
+// use crate::blind_insertion::blind_insertion;
 
-mod blind_push;
-use crate::blind_push::blind_push;
+// mod blind_push;
+// use crate::blind_push::blind_push;
 
-mod blind_pop;
-use crate::blind_pop::blind_pop;
+// mod blind_pop;
+// use crate::blind_pop::blind_pop;
 
-mod blind_retrieve;
-use crate::blind_retrieve::blind_retrieve;
+// mod blind_retrieve;
+// use crate::blind_retrieve::blind_retrieve;
 
 // mod private_insert;
 // use crate::private_insert::private_insert;
@@ -28,77 +28,52 @@ use crate::blind_retrieve::blind_retrieve;
 // mod test_perf_basic_op;
 // use crate::test_perf_basic_op::*;
 
-
+// mod blind_tensor_access;
+// use blind_tensor_access::*;
 
 
 mod uni_test;
 use crate::uni_test::*;
 
+// mod perf_test;
+// use crate::perf_test::*;
+
+
+// mod multi_cmp;
+// use crate::multi_cmp::*;
 
 // mod blind_sort;
 // use crate::blind_sort::*;
 
 
-mod blind_tensor_access;
-use blind_tensor_access::*;
 
-// mod demultiplexer;
-// use crate::demultiplexer::demultiplixer;
 
 // mod gist;
 // use crate::gist::*;
 
-
-// mod headers;
-
 pub fn main() {
 
-    test_blind_tensor_access();
-
-    // blind_array_access(); // from blind_array_access
-
-    // blind_array_access2d(); // from unitest_bacc2d
-
-    // blind_permutation(); // from blind_permutation
-
-    // blind_insertion(); // from blind_insertion
-
-    // blind_retrieve(); // from blind_retrieve
-
-    // blind_push(); // from blind_push
-
-    // blind_pop(); // from blind_pop
-
-    // private_insert(); // from private_insert
-
-    // test_perf_comp();
-
-    // test_comp_with_bmacc();
-
-    // test_perf_blind_rotation();
-
-    // test_perf_extract_switch();
-
-    // test_perf_packing();
-
-    // test_perf_glwe_sum();
-
-    // test_perf_lwe_sum();
-
-
+    // test_blind_tensor_access();
     // gist::packing_test();
 
 
+    // test_multi_cmp();
 
+
+    /* From uni_test */ 
     // test_blind_push();
     // test_blind_pop();
     // test_blind_matrix_access();
     // test_blind_insertion();
     // test_blind_retrieve();
     // test_blind_array_access();
+    test_blind_permutation();
+
+    /* From perf_test */ 
+    // compare_performance_bma_bmawp();
 
 
-
+    // blind_permutation();
 
 
 

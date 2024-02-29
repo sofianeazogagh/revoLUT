@@ -164,7 +164,7 @@ pub fn blind_permutation(){
 
 
 
-    println!("Time permutation : {:?}",duration_perm);
+    // println!("Time permutation : {:?}",duration_perm);
 
 
 }

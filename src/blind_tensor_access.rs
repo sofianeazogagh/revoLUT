@@ -118,25 +118,32 @@ fn blind_tensor_access(public_key: &PublicKey, ct_tensor: &Vec<LUT>, lwe_line: &
     outputs_channels
 }
 
-fn encode_tensor_into_matrix(tensor : Vec<Vec<Vec<u64>>>)
+fn encode_tensor_into_matrix(channels : Vec<Vec<Vec<u64>>>)
 -> Vec<Vec<u64>>
 {
 
-    let t_rows = tensor[0].len()*3;
-    let t_col = tensor[0][0].len();
 
-    let mut tensor_encoded = vec![vec![0; t_col]; t_rows];
+    let nb_of_channels = channels.len();
+
+    let t_rows = channels[0].len()*nb_of_channels;
+    let t_col = channels[0][0].len();
+
+    let mut tensor = vec![vec![0; t_col]; t_rows];
     
 
-    for i in 0.. tensor[0].len(){
+    for i in 0.. channels[0].len(){
         for j in 0..t_col{
-            for channel in 0..tensor.len(){
-                tensor_encoded[i*3 + channel][j] = tensor[channel][i][j];
+            for k in 0..channels.len(){
+                tensor[i*nb_of_channels + k][j] = channels[k][i][j];
             }
         }
     
     }
 
-    tensor_encoded
+    tensor
 }
+
+
+
+
 

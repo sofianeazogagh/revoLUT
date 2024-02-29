@@ -287,24 +287,19 @@ pub fn eval_perf() {
 
     let params_crypto = vec![PARAM_MESSAGE_2_CARRY_0,PARAM_MESSAGE_3_CARRY_0,PARAM_MESSAGE_4_CARRY_0,PARAM_MESSAGE_5_CARRY_0,PARAM_MESSAGE_6_CARRY_0];
     for params in params_crypto {
-        
-    
 
         let mut ctx = Context::from(params);
         let private_key = PrivateKey::new(&mut ctx);
         let public_key = &private_key.public_key;
 
-        // Our input message
+        // Our encrypted input
         let index_line = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
         let index_column = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
 
 
-        
         let matrix_size = vec![(2,2),(3,3),(4,4),(5,5),(6,6),(7,7),(8,8)];
-        
 
         for (n,m) in matrix_size{
-
 
             if params.message_modulus.0 >= n && params.message_modulus.0 >= m 
             {
@@ -313,23 +308,20 @@ pub fn eval_perf() {
 
                 let ct_matrix = private_key.encrypt_matrix(&mut ctx, &matrix);        
 
-                let num_iterations = 100;
-                for execution in 0..num_iterations {
-
+                let num_iterations = 20;
+                for execution in 0..num_iterations{
 
                     // Temps d'exécution de ce qu'on veut évaluer
                     let start_time= Instant::now();
                     let ct_1 = public_key.blind_matrix_access(&ct_matrix, &index_line, &index_column, &ctx);
                     let elapsed_time = start_time.elapsed();
                     
-
                     // Écrire les temps dans le fichier
                     writeln!(output_file, "{:?},{:?},{:?},{:?}",execution,n,params.message_modulus.0,elapsed_time.as_millis()).expect("Impossible d'écrire dans le fichier");
 
                 }
+            }
         }
-
-        }   
     }
 
 
