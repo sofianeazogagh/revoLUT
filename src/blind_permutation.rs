@@ -1,14 +1,14 @@
-use std::time::Duration;
+
 use std::time::Instant;
 
 use rayon::prelude::*;
 
-use num_complex::Complex;
-use tfhe::core_crypto::prelude::*;
-use aligned_vec::ABox;
-
 
 use tfhe::core_crypto::prelude::*;
+
+
+
+
 use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
 // #[path = "./headers.rs"] mod headers;
@@ -97,7 +97,7 @@ pub fn blind_permutation(){
     }
 
 
-    let result = LUT(result_glwe);
+    let _result = LUT(result_glwe);
 
 
     let duration_perm = start_perm.elapsed();

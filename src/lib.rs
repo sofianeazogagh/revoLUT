@@ -1,4 +1,4 @@
-use std::time::Instant;
+
 
 use aligned_vec::ABox;
 use num_complex::Complex;
@@ -139,15 +139,6 @@ pub struct PrivateKey {
 
 impl PrivateKey {
     /// Generate a PrivateKey which contain also the PublicKey
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// // Generate the keys and get them in different variables:
-    /// let mut ctx = Context::new(PARAM_MESSAGE_2_CARRY_2)
-    /// let private_key = PrivateKey::new(&ctx);
-    /// ```
-    ///
     pub fn new(ctx: &mut Context) -> PrivateKey {
         // Generate an LweSecretKey with binary coefficients
         let small_lwe_sk =
@@ -482,7 +473,7 @@ impl PrivateKey {
             let ct_line = LUT::from_vec(line, self, &mut ctx);
             ct_matrix.push(ct_line);
         }
-        for i in ct_matrix.len()..ctx.message_modulus().0 {
+        for _i in ct_matrix.len()..ctx.message_modulus().0 {
             let ct_padding = LUT::from_vec(&vec![0u64], self, &mut ctx);
             ct_matrix.push(ct_padding);
         }
@@ -1507,7 +1498,7 @@ impl LUT {
         println!("{:?}", result_retrieve_u64);
     }
 
-    pub fn public_rotate_right(&mut self, rotation: u64, public_key: &PublicKey, ctx: &Context) {
+    pub fn public_rotate_right(&mut self, rotation: u64, public_key: &PublicKey, _ctx: &Context) {
         public_key.glwe_absorption_monic_monomial(&mut self.0, MonomialDegree(rotation as usize));
     }
 

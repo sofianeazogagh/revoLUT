@@ -1,8 +1,8 @@
-use std::time::Duration;
+
 use std::time::Instant;
 use std::vec;
 
-use rayon::prelude::*;
+
 
 use tfhe::core_crypto::prelude::*;
 use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
@@ -77,7 +77,7 @@ pub fn blind_pop(){
     let mut new_number_of_element = LweCiphertext::new(0_u64, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
     lwe_ciphertext_sub(&mut new_number_of_element, &stack_len, &lwe_one);
 
-    let lut_pop = LUTStack{
+    let _lut_pop = LUTStack{
         lut : result,
         number_of_elements : new_number_of_element
     };
