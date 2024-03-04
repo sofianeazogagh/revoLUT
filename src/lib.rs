@@ -6,7 +6,6 @@ extern crate quickcheck_macros;
 
 use std::fs;
 use std::sync::OnceLock;
-
 use aligned_vec::ABox;
 use num_complex::Complex;
 use rayon::prelude::*;
@@ -1643,10 +1642,53 @@ impl LUT {
             let pt = private_key.decrypt_lwe(&lwe, &ctx);
             result_retrieve_u64.push(pt);
         }
+
         println!("{:?}", result_retrieve_u64);
     }
 
-    pub fn public_rotate_right(&mut self, rotation: u64, public_key: &PublicKey, _ctx: &Context) {
+    pub fn to_array(&self, private_key: &PrivateKey, ctx: &Context) -> Vec<u64> {
+        let half_box_size = ctx.box_size() / 2;
+
+        let mut result_insert: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
+        result_insert.par_extend((0..ctx.full_message_modulus()).into_par_iter().map(|i| {
+            let mut lwe_sample = LweCiphertext::new(
+                0_64,
+                ctx.big_lwe_dimension().to_lwe_size(),
+                ctx.ciphertext_modulus(),
+            );
+            extract_lwe_sample_from_glwe_ciphertext(
+                &self.0,
+                &mut lwe_sample,
+                MonomialDegree((i * ctx.box_size() + half_box_size) as usize),
+            );
+            let mut switched = LweCiphertext::new(
+                0,
+                ctx.small_lwe_dimension().to_lwe_size(),
+                ctx.ciphertext_modulus(),
+            );
+            keyswitch_lwe_ciphertext(
+                &private_key.public_key.lwe_ksk,
+                &mut lwe_sample,
+                &mut switched,
+            );
+
+            // switched
+
+            // the result will be modulo 32
+            private_key.public_key.wrapping_neg_lwe(&mut switched);
+            switched
+        }));
+
+        let mut result_retrieve_u64: Vec<u64> = Vec::new();
+        for lwe in result_insert {
+            let pt = private_key.decrypt_lwe(&lwe, &ctx);
+            result_retrieve_u64.push(pt);
+        }
+
+        result_retrieve_u64
+    }
+
+    pub fn public_rotate_right(&mut self, rotation: u64, public_key: &PublicKey, ctx: &Context) {
         public_key.glwe_absorption_monic_monomial(&mut self.0, MonomialDegree(rotation as usize));
     }
 

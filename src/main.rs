@@ -23,6 +23,7 @@
 
 // mod uni_test;
 
+
 // mod blind_sort;
 // use crate::blind_sort::*;
 
@@ -84,11 +85,4 @@ pub fn main() {
     // test_perf_lwe_sum();
 
     // gist::packing_test();
-
-    // test_blind_push();
-    // test_blind_pop();
-    // test_blind_matrix_access();
-    // test_blind_insertion();
-    // test_blind_retrieve();
-    // test_blind_array_access();
 }
