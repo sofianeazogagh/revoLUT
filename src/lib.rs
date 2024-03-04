@@ -1,10 +1,59 @@
+#[cfg(test)]
+extern crate quickcheck;
+#[cfg(test)]
+#[macro_use(quickcheck)]
+extern crate quickcheck_macros;
+
+use std::fs;
+use std::sync::OnceLock;
 use aligned_vec::ABox;
 use num_complex::Complex;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
 use tfhe::shortint::{prelude::CiphertextModulus, prelude::*};
+
+/// lazily compute a trivially encrypted boolean comparison matrix of the form:
+/// ```text
+/// 0 0 0
+/// 1 0 0
+/// 1 1 0
+/// ```
+fn cmp_matrix(ctx: &Context) -> &'static Vec<LUT> {
+    static MATRIX: OnceLock<Vec<LUT>> = OnceLock::new();
+    MATRIX.get_or_init(|| {
+        Vec::from_iter((0..ctx.full_message_modulus).map(|i| {
+            LUT::from_vec_trivially(
+                &Vec::from_iter((0..ctx.full_message_modulus).map(|j| if j < i { 1 } else { 0 })),
+                ctx,
+            )
+        }))
+    })
+}
+
+#[cfg(test)]
+fn key2() -> &'static PrivateKey {
+    use tfhe::shortint::parameters::PARAM_MESSAGE_2_CARRY_0;
+
+    static PRIVATE_KEY2: std::sync::OnceLock<PrivateKey> = std::sync::OnceLock::new();
+    PRIVATE_KEY2.get_or_init(|| {
+        PrivateKey::from_file("PrivateKey2")
+            .unwrap_or(PrivateKey::new(&mut Context::from(PARAM_MESSAGE_2_CARRY_0)))
+    })
+}
+
+#[cfg(test)]
+fn key4() -> &'static PrivateKey {
+    use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
+
+    static PRIVATE_KEY2: std::sync::OnceLock<PrivateKey> = std::sync::OnceLock::new();
+    PRIVATE_KEY2.get_or_init(|| {
+        PrivateKey::from_file("PrivateKey4")
+            .unwrap_or(PrivateKey::new(&mut Context::from(PARAM_MESSAGE_4_CARRY_0)))
+    })
+}
 
 pub struct Context {
     parameters: ClassicPBSParameters,
@@ -128,6 +177,7 @@ impl Context {
     // pub fn signed_decomposer(&self) -> SignedDecomposer<u64> {self.signed_decomposer}
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct PrivateKey {
     small_lwe_sk: LweSecretKey<Vec<u64>>,
     big_lwe_sk: LweSecretKey<Vec<u64>>,
@@ -246,6 +296,13 @@ impl PrivateKey {
             glwe_sk,
             public_key,
         }
+    }
+
+    /// Load a private key from a file instead of generating it
+    pub fn from_file(path: &str) -> Option<PrivateKey> {
+        fs::read(path)
+            .ok()
+            .and_then(|buf| bincode::deserialize(&buf).ok())
     }
 
     // getters for each attribute
@@ -488,6 +545,7 @@ impl PrivateKey {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct PublicKey {
     // utilKey ou ServerKey ou CloudKey
     pub lwe_ksk: LweKeyswitchKey<Vec<u64>>,
@@ -1108,6 +1166,88 @@ impl PublicKey {
 
         outputs_channels
     }
+
+    fn allocate_and_keyswitch_lwe_ciphertext(
+        &self,
+        mut lwe: LweCiphertext<Vec<u64>>,
+        ctx: &Context,
+    ) -> LweCiphertext<Vec<u64>> {
+        let mut switched = LweCiphertext::new(
+            0,
+            ctx.parameters.lwe_dimension.to_lwe_size(),
+            ctx.ciphertext_modulus,
+        );
+        keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut lwe, &mut switched);
+
+        switched
+    }
+
+    /// returns the ciphertext at index i from the given lut, accounting for redundancy
+    fn at(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
+        let mut lwe = LweCiphertext::new(
+            0u64,
+            ctx.big_lwe_dimension.to_lwe_size(),
+            ctx.ciphertext_modulus,
+        );
+        extract_lwe_sample_from_glwe_ciphertext(&lut.0, &mut lwe, MonomialDegree(i * ctx.box_size));
+        self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
+    }
+
+    /// compares a and b blindly, returning a cipher of 1 if a < b else 0
+    fn blind_lt(
+        &self,
+        a: &LweCiphertext<Vec<u64>>,
+        b: &LweCiphertext<Vec<u64>>,
+        ctx: &Context,
+    ) -> LweCiphertext<Vec<u64>> {
+        self.blind_matrix_access(cmp_matrix(ctx), b, a, ctx)
+    }
+
+    /// run f(ct_input), assuming lut was constructed with LUT::from_function(f)
+    pub fn run_lut(
+        &self,
+        ct_input: &LweCiphertext<Vec<u64>>,
+        lut: &LUT,
+        ctx: &Context,
+    ) -> LweCiphertext<Vec<u64>> {
+        let mut lwe = LweCiphertext::new(
+            0u64,
+            ctx.big_lwe_dimension.to_lwe_size(),
+            ctx.ciphertext_modulus,
+        );
+        programmable_bootstrap_lwe_ciphertext(&ct_input, &mut lwe, &lut.0, &self.fourier_bsk);
+        self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
+    }
+
+    /// Direct Sort of distinct values
+    pub fn blind_sort_bma(&self, lut: LUT, ctx: &Context) -> LUT {
+        let n = ctx.full_message_modulus;
+        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let mut permutation = vec![zero; n];
+        let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
+        for col in 0..n {
+            let a = self.at(&lut, col, ctx);
+            for lin in 0..col {
+                let b = self.at(&lut, lin, ctx);
+                let res = self.blind_lt(&a, &b, ctx);
+                lwe_ciphertext_add_assign(&mut permutation[col], &res);
+                lwe_ciphertext_add_assign(&mut permutation[lin], &one);
+                lwe_ciphertext_sub_assign(&mut permutation[lin], &res);
+            }
+        }
+
+        #[cfg(test)]
+        {
+            let private_key = key2();
+            let decrypted: Vec<u64> = (0..n)
+                .map(|i| private_key.decrypt_lwe(&permutation[i], ctx))
+                .collect();
+            println!("decrypted permutation {:?}", decrypted);
+        }
+
+        // TODO: permutation might be backward
+        self.blind_permutation(lut, permutation, ctx)
+    }
 }
 
 pub struct LUT(pub GlweCiphertext<Vec<u64>>);
@@ -1225,6 +1365,15 @@ impl LUT {
         let accumulator_plaintext = PlaintextList::from_container(redundant_lut);
         private_key.encrypt_glwe(&mut lut_as_glwe, accumulator_plaintext, ctx);
         LUT(lut_as_glwe)
+    }
+
+    fn from_vec_trivially(data: &Vec<u64>, ctx: &Context) -> LUT {
+        let redundant_lut = Self::add_redundancy_many_u64(data, ctx);
+        LUT(allocate_and_trivially_encrypt_new_glwe_ciphertext(
+            ctx.glwe_dimension().to_glwe_size(),
+            &PlaintextList::from_container(redundant_lut),
+            ctx.ciphertext_modulus(),
+        ))
     }
 
     pub fn from_vec_of_lwe(
@@ -1688,16 +1837,17 @@ impl LUTStack {
 #[cfg(test)]
 
 mod test {
-
     // use tfhe::core_crypto::prelude::*;
-    use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
+
+    use quickcheck::TestResult;
+    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
 
     use super::*;
 
     #[test]
     fn test_lwe_enc() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let input: u64 = 3;
         let lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
         let clear = private_key.decrypt_lwe(&lwe, &mut ctx);
@@ -1708,7 +1858,7 @@ mod test {
     #[test]
     fn test_lut_enc() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let array = vec![0, 1, 2, 3, 4];
         let _lut = LUT::from_vec(&array, &private_key, &mut ctx);
     }
@@ -1716,7 +1866,7 @@ mod test {
     #[test]
     fn test_neg_lwe() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let public_key = &private_key.public_key;
         let input: u64 = 3;
         let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
@@ -1730,7 +1880,7 @@ mod test {
     #[test]
     fn test_neg_lwe_assign() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let public_key = &private_key.public_key;
         let input: u64 = 3;
         let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
@@ -1761,7 +1911,7 @@ mod test {
     #[test]
     fn test_lwe_to_lut() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let public_key = &private_key.public_key;
         let our_input = 8u64;
         let lwe = private_key.allocate_and_encrypt_lwe(our_input, &mut ctx);
@@ -1775,7 +1925,7 @@ mod test {
 
     fn test_eq_scalar() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let public_key = &private_key.get_public_key();
         let our_input = 0u64;
         let lwe = private_key.allocate_and_encrypt_lwe(our_input, &mut ctx);
@@ -1790,7 +1940,7 @@ mod test {
     #[test]
     fn test_lut_stack_from_lut() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key4();
         let public_key = &private_key.public_key;
         let array = vec![2, 1, 2, 3, 4];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
@@ -1798,5 +1948,58 @@ mod test {
         let lut_stack = LUTStack::from_lut(lut, public_key, &ctx);
 
         lut_stack.print(&private_key, &ctx);
+    }
+
+    #[test]
+    fn test_blind_lt() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key2();
+        let public_key = &private_key.public_key;
+
+        for a in 0..ctx.message_modulus().0 {
+            let c_a = private_key.allocate_and_encrypt_lwe(a as u64, &mut ctx);
+            for b in 0..ctx.message_modulus().0 {
+                let c_b = private_key.allocate_and_encrypt_lwe(b as u64, &mut ctx);
+                let c_res = public_key.blind_lt(&c_a, &c_b, &ctx);
+                let res = private_key.decrypt_lwe(&c_res, &ctx);
+
+                assert!(res == if a < b { 1 } else { 0 });
+            }
+        }
+    }
+
+    #[test]
+    fn test_blind_sort_bma() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key2();
+        let public_key = &private_key.public_key;
+        let array = vec![1, 3, 2, 0];
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        lut.print(&private_key, &ctx);
+
+        let sorted_lut = public_key.blind_sort_bma(lut, &ctx);
+        println!("sorted");
+        sorted_lut.print(&private_key, &ctx);
+        // TODO: actually assert
+    }
+
+    #[quickcheck]
+    fn test_at(mut array: Vec<u64>, i: usize) -> TestResult {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key4();
+        let public_key = &private_key.public_key;
+
+        array.truncate(16);
+        array.iter_mut().for_each(|x| *x %= 16);
+        if !(i < array.len()) {
+            return TestResult::discard();
+        }
+
+        let expected = array[i];
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        let lwe = public_key.at(&lut, i, &ctx);
+        let actual = private_key.decrypt_lwe(&lwe, &ctx);
+
+        TestResult::from_bool(actual == expected)
     }
 }
