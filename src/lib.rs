@@ -1952,8 +1952,8 @@ mod test {
 
     #[test]
     fn test_blind_lt() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key4();
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key2();
         let public_key = &private_key.public_key;
 
         for a in 0..ctx.message_modulus().0 {
