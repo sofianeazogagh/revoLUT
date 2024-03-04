@@ -7,11 +7,11 @@ edition = "2021"
 
 [dependencies]
 
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-tfhe = { version = "0.3.1", features = ["boolean", "shortint", "x86_64-unix"] }
+# [target.'cfg(target_arch = "x86_64")'.dependencies]
+# tfhe = { version = "0.3.1", features = ["boolean", "shortint", "x86_64-unix"] }
 
 
-# tfhe = { version = "0.3.1", features = [ "boolean", "shortint", "aarch64-unix" ] }
+tfhe = { version = "0.3.1", features = ["boolean", "shortint", "aarch64-unix"] }
 num-complex = "0.4.0"
 arrayvec = "0.7.2"
 aligned-vec = "0.5.0"
