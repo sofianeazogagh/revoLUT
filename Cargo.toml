@@ -24,6 +24,8 @@ serde = { version = "1.0", features = ["derive"] }
 
 # [dev-dependencies]
 # criterion = "0.3"
+quickcheck = "1"
+quickcheck_macros = "1"
 
 # [[bench]]
 # name = "benchmarks"

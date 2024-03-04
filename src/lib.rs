@@ -1,3 +1,9 @@
+#[cfg(test)]
+extern crate quickcheck;
+#[cfg(test)]
+#[macro_use(quickcheck)]
+extern crate quickcheck_macros;
+
 use std::fs;
 use std::sync::OnceLock;
 
@@ -1177,13 +1183,14 @@ impl PublicKey {
         switched
     }
 
-    fn extract_lwe_sample(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
+    /// returns the ciphertext at index i from the given lut, accounting for redundancy
+    fn at(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
         let mut lwe = LweCiphertext::new(
             0u64,
             ctx.big_lwe_dimension.to_lwe_size(),
             ctx.ciphertext_modulus,
         );
-        extract_lwe_sample_from_glwe_ciphertext(&lut.0, &mut lwe, MonomialDegree(i));
+        extract_lwe_sample_from_glwe_ciphertext(&lut.0, &mut lwe, MonomialDegree(i * ctx.box_size));
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
 
@@ -1198,7 +1205,7 @@ impl PublicKey {
     }
 
     /// run f(ct_input), assuming lut was constructed with LUT::from_function(f)
-    fn run_lut(
+    pub fn run_lut(
         &self,
         ct_input: &LweCiphertext<Vec<u64>>,
         lut: &LUT,
@@ -1216,26 +1223,17 @@ impl PublicKey {
     /// Direct Sort of distinct values
     pub fn blind_sort_bma(&self, lut: LUT, ctx: &Context) -> LUT {
         let n = ctx.full_message_modulus;
-        let notlut = LUT::from_function(|i| if i == 0 { 1 } else { 0 }, ctx);
         let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let mut permutation = vec![zero; n];
+        let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
         for col in 0..n {
-            let a = self.extract_lwe_sample(&lut, col, ctx);
+            let a = self.at(&lut, col, ctx);
             for lin in 0..col {
-                // TODO fix index to account for redundancy
-                let b = self.extract_lwe_sample(&lut, lin, ctx);
+                let b = self.at(&lut, lin, ctx);
                 let res = self.blind_lt(&a, &b, ctx);
-                #[cfg(test)]
-                {
-                    let private_key = key2();
-                    let d_a = private_key.decrypt_lwe(&a, ctx);
-                    let d_b = private_key.decrypt_lwe(&b, ctx);
-                    let d_res = private_key.decrypt_lwe(&res, ctx);
-                    println!("({}, {}), {} < {}: {}", lin, col, d_a, d_b, d_res);
-                }
                 lwe_ciphertext_add_assign(&mut permutation[col], &res);
-                let notres = self.run_lut(&res, &notlut, ctx);
-                lwe_ciphertext_add_assign(&mut permutation[lin], &notres);
+                lwe_ciphertext_add_assign(&mut permutation[lin], &one);
+                lwe_ciphertext_sub_assign(&mut permutation[lin], &res);
             }
         }
 
@@ -1245,7 +1243,7 @@ impl PublicKey {
             let decrypted: Vec<u64> = (0..n)
                 .map(|i| private_key.decrypt_lwe(&permutation[i], ctx))
                 .collect();
-            println!("{:?}", decrypted);
+            println!("decrypted permutation {:?}", decrypted);
         }
 
         // TODO: permutation might be backward
@@ -1797,8 +1795,9 @@ impl LUTStack {
 #[cfg(test)]
 
 mod test {
-
     // use tfhe::core_crypto::prelude::*;
+
+    use quickcheck::TestResult;
     use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
 
     use super::*;
@@ -1911,8 +1910,8 @@ mod test {
 
     #[test]
     fn test_blind_lt() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key2();
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key4();
         let public_key = &private_key.public_key;
 
         for a in 0..ctx.message_modulus().0 {
@@ -1937,7 +1936,28 @@ mod test {
         lut.print(&private_key, &ctx);
 
         let sorted_lut = public_key.blind_sort_bma(lut, &ctx);
+        println!("sorted");
         sorted_lut.print(&private_key, &ctx);
         // TODO: actually assert
+    }
+
+    #[quickcheck]
+    fn test_at(mut array: Vec<u64>, i: usize) -> TestResult {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key4();
+        let public_key = &private_key.public_key;
+
+        array.truncate(16);
+        array.iter_mut().for_each(|x| *x %= 16);
+        if !(i < array.len()) {
+            return TestResult::discard();
+        }
+
+        let expected = array[i];
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        let lwe = public_key.at(&lut, i, &ctx);
+        let actual = private_key.decrypt_lwe(&lwe, &ctx);
+
+        TestResult::from_bool(actual == expected)
     }
 }
