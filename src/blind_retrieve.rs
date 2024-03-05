@@ -55,7 +55,7 @@ pub fn blind_retrieve(){
         // get the element wanted
     blind_rotate_assign(&index_retrieve, &mut lut_original_array.0, &public_key.fourier_bsk);
     extract_lwe_sample_from_glwe_ciphertext(&lut_original_array.0, &mut big_lwe, MonomialDegree(0));
-    keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &big_lwe , &mut lwe_retrieve);
+    par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &big_lwe , &mut lwe_retrieve);
 
     let duration_get = start_get.elapsed();
     println!("Time getting the element : {:?}", duration_get);
@@ -178,7 +178,7 @@ fn fun_name(mut ctx: Context, result: GlweCiphertext<Vec<u64>>, public_key: &Pub
                 MonomialDegree((i * ctx.box_size() + half_box_size) as usize),
             );
             let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
-            keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
+            par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
 
             // switched
 
@@ -206,7 +206,7 @@ fn one_lut_to_many_lut(lut: LUT, public_key: &PublicKey, ctx: &Context) -> Vec<L
     for lwe in many_lwe{
         let mut glwe = GlweCiphertext::new(0_u64,ctx.glwe_dimension().to_glwe_size(),ctx.polynomial_size(), ctx.ciphertext_modulus());
         let redundancy_lwe = one_lwe_to_lwe_ciphertext_list(lwe, ctx);
-        private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
             &mut glwe,
             &redundancy_lwe);
@@ -263,7 +263,7 @@ pub fn leq_scalar(
         &public_key.fourier_bsk,
     );
     let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
-    keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut res_cmp, &mut switched);
+    par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut res_cmp, &mut switched);
 
     switched
 }

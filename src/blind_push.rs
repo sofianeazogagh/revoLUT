@@ -101,7 +101,7 @@ pub fn blind_push(){
             );
             // key switching
             let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
-            keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
+            par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
             switched
         }),
     );
@@ -132,7 +132,7 @@ fn one_lut_to_many_lut(lut: LUT, public_key: &PublicKey, ctx: &Context) -> Vec<L
     for lwe in many_lwe{
         let mut glwe = GlweCiphertext::new(0_u64,ctx.glwe_dimension().to_glwe_size(),ctx.polynomial_size(), ctx.ciphertext_modulus());
         let redundancy_lwe = one_lwe_to_lwe_ciphertext_list(lwe, ctx);
-        private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
             &mut glwe,
             &redundancy_lwe);
@@ -189,7 +189,7 @@ pub fn leq_scalar(
         &public_key.fourier_bsk,
     );
     let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(), ctx.ciphertext_modulus());
-    keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut res_cmp, &mut switched);
+    par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut res_cmp, &mut switched);
 
     switched
 }

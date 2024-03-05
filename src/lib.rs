@@ -11,6 +11,7 @@ use num_complex::Complex;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
+use tfhe::{core_crypto::algorithms::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
 use tfhe::shortint::{prelude::CiphertextModulus, prelude::*};
@@ -614,7 +615,7 @@ impl PublicKey {
             ctx.small_lwe_dimension().to_lwe_size(),
             ctx.ciphertext_modulus(),
         );
-        keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut res_cmp, &mut switched);
+        par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut res_cmp, &mut switched);
 
         switched
     }
@@ -642,7 +643,7 @@ impl PublicKey {
             ctx.small_lwe_dimension().to_lwe_size(),
             ctx.ciphertext_modulus(),
         );
-        keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut res_cmp, &mut switched);
+        par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut res_cmp, &mut switched);
 
         switched
     }
@@ -670,7 +671,7 @@ impl PublicKey {
             ctx.small_lwe_dimension().to_lwe_size(),
             ctx.ciphertext_modulus(),
         );
-        keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut res_eq, &mut switched);
+        par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut res_eq, &mut switched);
 
         switched
     }
@@ -795,7 +796,7 @@ impl PublicKey {
             ctx.small_lwe_dimension().to_lwe_size(),
             ctx.ciphertext_modulus(),
         );
-        keyswitch_lwe_ciphertext(&self.lwe_ksk, &output, &mut switched);
+        par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &output, &mut switched);
         return switched;
     }
 
@@ -832,7 +833,7 @@ impl PublicKey {
                 ctx.small_lwe_dimension().to_lwe_size(),
                 ctx.ciphertext_modulus(),
             );
-            keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
+            par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
             switched
         }));
 
@@ -853,7 +854,7 @@ impl PublicKey {
             &accumulator_final.0,
             &self.fourier_bsk,
         );
-        keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut output);
+        par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut output);
         return output;
     }
 
@@ -876,7 +877,7 @@ impl PublicKey {
     //                 &self.fourier_bsk,
     //             );
     //             let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
-    //             keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
+    //             par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
     //             switched
     //         }),
     //     );
@@ -888,7 +889,7 @@ impl PublicKey {
     //     // final blind array access
     //     let mut ct_res = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
     //     programmable_bootstrap_lwe_ciphertext(&index_line_encoded, &mut ct_res, &accumulator_final.0, &self.fourier_bsk,);
-    //     keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut output);
+    //     par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut output);
     //     return output
     // }
 
@@ -987,7 +988,7 @@ impl PublicKey {
         // get the element wanted
         blind_rotate_assign(&index_retrieve, &mut lut.0, &self.fourier_bsk);
         extract_lwe_sample_from_glwe_ciphertext(&lut.0, &mut big_lwe, MonomialDegree(0));
-        keyswitch_lwe_ciphertext(&self.lwe_ksk, &big_lwe, &mut lwe_retrieve);
+        par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &big_lwe, &mut lwe_retrieve);
 
         let lut_retrieve = LUT::from_lwe(&lwe_retrieve, self, &*ctx);
         let mut lut_sum = LUT(self.glwe_sum(&lut.0, &lut_retrieve.0));
@@ -1059,7 +1060,7 @@ impl PublicKey {
             &mut lwe_pop_not_switched,
             MonomialDegree(0),
         );
-        keyswitch_lwe_ciphertext(&self.lwe_ksk, &lwe_pop_not_switched, &mut lwe_pop);
+        par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &lwe_pop_not_switched, &mut lwe_pop);
 
         // Delete from the stack and re-rotate
         let lut_used_to_delete = LUT::from_lwe(&lwe_pop, &self, &ctx);
@@ -1127,7 +1128,7 @@ impl PublicKey {
                 ctx.small_lwe_dimension().to_lwe_size(),
                 ctx.ciphertext_modulus(),
             );
-            keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
+            par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
             switched
         }));
 
@@ -1160,7 +1161,7 @@ impl PublicKey {
                 ctx.small_lwe_dimension().to_lwe_size(),
                 ctx.ciphertext_modulus(),
             );
-            keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut switched);
+            par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut switched);
             outputs_channels.push(switched);
         }
 
@@ -1177,7 +1178,7 @@ impl PublicKey {
             ctx.parameters.lwe_dimension.to_lwe_size(),
             ctx.ciphertext_modulus,
         );
-        keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut lwe, &mut switched);
+        par_keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut lwe, &mut switched);
 
         switched
     }
@@ -1475,7 +1476,7 @@ impl LUT {
         );
 
         // Keyswitch and pack
-        private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
             &mut glwe,
             &lwe_ciphertext_list,
@@ -1537,7 +1538,7 @@ impl LUT {
                 ctx.small_lwe_dimension().to_lwe_size(),
                 ctx.ciphertext_modulus(),
             );
-            keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
+            par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
             many_lwe.push(switched);
         }
         many_lwe
@@ -1624,7 +1625,7 @@ impl LUT {
                 ctx.small_lwe_dimension().to_lwe_size(),
                 ctx.ciphertext_modulus(),
             );
-            keyswitch_lwe_ciphertext(
+            par_keyswitch_lwe_ciphertext(
                 &private_key.public_key.lwe_ksk,
                 &mut lwe_sample,
                 &mut switched,
@@ -1666,7 +1667,7 @@ impl LUT {
                 ctx.small_lwe_dimension().to_lwe_size(),
                 ctx.ciphertext_modulus(),
             );
-            keyswitch_lwe_ciphertext(
+            par_keyswitch_lwe_ciphertext(
                 &private_key.public_key.lwe_ksk,
                 &mut lwe_sample,
                 &mut switched,
@@ -1791,7 +1792,7 @@ impl LUTStack {
                 ctx.small_lwe_dimension().to_lwe_size(),
                 ctx.ciphertext_modulus(),
             );
-            keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
+            par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
 
             let cp = public_key.eq_scalar(&switched, 0, &ctx);
 

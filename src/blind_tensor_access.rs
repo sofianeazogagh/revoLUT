@@ -88,7 +88,7 @@ fn blind_tensor_access(public_key: &PublicKey, ct_tensor: &Vec<LUT>, lwe_line: &
                     &public_key.fourier_bsk,
                 );
                 let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
-                keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut pbs_ct, &mut switched);
+                par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut pbs_ct, &mut switched);
                 switched
             }),
     );
@@ -110,7 +110,7 @@ fn blind_tensor_access(public_key: &PublicKey, ct_tensor: &Vec<LUT>, lwe_line: &
         let mut ct_res = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
         extract_lwe_sample_from_glwe_ciphertext(&lut_column.0, &mut ct_res, MonomialDegree(0  +channel*ctx.box_size() as usize));
         let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
-        keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut ct_res, &mut switched);
+        par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut ct_res, &mut switched);
         outputs_channels.push(switched);
 
     }

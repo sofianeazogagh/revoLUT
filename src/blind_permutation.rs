@@ -72,7 +72,7 @@ pub fn blind_permutation(){
     // for lwe in many_lwe{
     //     let mut glwe = GlweCiphertext::new(0_u64,ctx.glwe_dimension().to_glwe_size(),ctx.polynomial_size());
     //     let redundancy_lwe = one_lwe_to_lwe_ciphertext_list(lwe, &ctx);
-    //     private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+    //     par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
     //         &public_key.pfpksk,
     //         &mut glwe,
     //         &redundancy_lwe);
@@ -131,7 +131,7 @@ pub fn blind_permutation(){
     //             MonomialDegree((i * ctx.box_size() + half_box_size) as usize),
     //         );
     //         let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size());
-    //         keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
+    //         par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
 
     //         // the result will be modulo 32
     //         let mut output = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size());

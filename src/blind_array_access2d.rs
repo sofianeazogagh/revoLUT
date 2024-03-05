@@ -129,7 +129,7 @@ use revolut::*;
                         &public_key.fourier_bsk,
                     );
                     let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
-                    keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut pbs_ct, &mut switched);
+                    par_keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut pbs_ct, &mut switched);
                     switched
                 }),
         );
