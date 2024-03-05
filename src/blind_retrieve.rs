@@ -207,7 +207,7 @@ fn one_lut_to_many_lut(lut: LUT, public_key: &PublicKey, ctx: &Context) -> Vec<L
         let mut glwe = GlweCiphertext::new(0_u64,ctx.glwe_dimension().to_glwe_size(),ctx.polynomial_size(), ctx.ciphertext_modulus());
         let redundancy_lwe = one_lwe_to_lwe_ciphertext_list(lwe, ctx);
         par_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-            &public_key.pfpksk,
+            &public_key.pkk,
             &redundancy_lwe,
             &mut glwe,
             );

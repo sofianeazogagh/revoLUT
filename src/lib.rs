@@ -284,11 +284,23 @@ impl PrivateKey {
             &mut ctx.encryption_generator,
         );
 
+        let pkk= allocate_and_generate_new_lwe_packing_keyswitch_key(
+            &big_lwe_sk,
+            &glwe_sk,
+            ctx.pfks_base_log(),
+            ctx.pfks_level(),
+            ctx.pfks_modular_std_dev(),
+            ctx.ciphertext_modulus(),
+            &mut ctx.encryption_generator,
+
+        );
+
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
             pfpksk,
             cbs_pfpksk,
+            pkk,
         };
 
         PrivateKey {
@@ -553,6 +565,7 @@ pub struct PublicKey {
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
     pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub cbs_pfpksk: LwePrivateFunctionalPackingKeyswitchKeyListOwned<u64>,
+    pub pkk:lwe_packing_keyswitch_key,
 }
 
 impl PublicKey {
@@ -1477,7 +1490,7 @@ impl LUT {
 
         // Keyswitch and pack
         par_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-            &public_key.pfpksk,
+            &public_key.pkk,
             &lwe_ciphertext_list,
             &mut glwe,
 
@@ -1506,7 +1519,7 @@ impl LUT {
         );
         // Keyswitch and pack
     par_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-            &public_key.pfpksk,
+            &public_key.pkk,
             &lwe_ciphertext_list,
             &mut glwe,
         );
@@ -1559,7 +1572,7 @@ impl LUT {
             );
             let redundancy_lwe = public_key.one_lwe_to_lwe_ciphertext_list(lwe, ctx);
             par_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-                &public_key.pfpksk,
+                &public_key.pkk,
                 &redundancy_lwe,
                 &mut glwe,
 

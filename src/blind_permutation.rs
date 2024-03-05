@@ -73,7 +73,7 @@ pub fn blind_permutation(){
     //     let mut glwe = GlweCiphertext::new(0_u64,ctx.glwe_dimension().to_glwe_size(),ctx.polynomial_size());
     //     let redundancy_lwe = one_lwe_to_lwe_ciphertext_list(lwe, &ctx);
     //     par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-    //         &public_key.pfpksk,
+    //         &public_key.pkk,
     //         &mut glwe,
     //         &redundancy_lwe);
     //     many_glwe.push(glwe);
