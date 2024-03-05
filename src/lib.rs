@@ -1476,10 +1476,11 @@ impl LUT {
         );
 
         // Keyswitch and pack
-        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        par_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
-            &mut glwe,
             &lwe_ciphertext_list,
+            &mut glwe,
+
         );
         LUT(glwe)
     }
@@ -1504,10 +1505,10 @@ impl LUT {
             ctx.ciphertext_modulus(),
         );
         // Keyswitch and pack
-        private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+    par_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
-            &mut glwe,
             &lwe_ciphertext_list,
+            &mut glwe,
         );
 
         let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
@@ -1557,10 +1558,11 @@ impl LUT {
                 ctx.ciphertext_modulus(),
             );
             let redundancy_lwe = public_key.one_lwe_to_lwe_ciphertext_list(lwe, ctx);
-            private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+            par_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
                 &public_key.pfpksk,
-                &mut glwe,
                 &redundancy_lwe,
+                &mut glwe,
+
             );
             many_glwe.push(LUT(glwe));
         }

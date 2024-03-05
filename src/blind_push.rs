@@ -132,10 +132,11 @@ fn one_lut_to_many_lut(lut: LUT, public_key: &PublicKey, ctx: &Context) -> Vec<L
     for lwe in many_lwe{
         let mut glwe = GlweCiphertext::new(0_u64,ctx.glwe_dimension().to_glwe_size(),ctx.polynomial_size(), ctx.ciphertext_modulus());
         let redundancy_lwe = one_lwe_to_lwe_ciphertext_list(lwe, ctx);
-        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        par_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
+            &redundancy_lwe,
             &mut glwe,
-            &redundancy_lwe);
+            );
         many_glwe.push(LUT(glwe));
     }
     many_glwe
