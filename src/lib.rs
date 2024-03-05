@@ -565,7 +565,7 @@ pub struct PublicKey {
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
     pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub cbs_pfpksk: LwePrivateFunctionalPackingKeyswitchKeyListOwned<u64>,
-    pub pkk:lwe_packing_keyswitch_key,
+    pub pkk:LwePackingKeyswitchKeyOwned<u64>,
 }
 
 impl PublicKey {
