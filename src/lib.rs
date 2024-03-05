@@ -275,7 +275,7 @@ impl PrivateKey {
         );
 
         let cbs_pfpksk = par_allocate_and_generate_new_circuit_bootstrap_lwe_pfpksk_list(
-            &big_lwe_sk,
+            &small_lwe_sk,
             &glwe_sk,
             ctx.pfks_base_log(),
             ctx.pfks_level(),
