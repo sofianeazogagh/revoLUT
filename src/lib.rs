@@ -1230,9 +1230,9 @@ impl PublicKey {
             for lin in 0..col {
                 let b = self.at(&lut, lin, ctx);
                 let res = self.blind_lt(&a, &b, ctx);
-                lwe_ciphertext_add_assign(&mut permutation[col], &res);
-                lwe_ciphertext_add_assign(&mut permutation[lin], &one);
-                lwe_ciphertext_sub_assign(&mut permutation[lin], &res);
+                lwe_ciphertext_add_assign(&mut permutation[lin], &res);
+                lwe_ciphertext_add_assign(&mut permutation[col], &one);
+                lwe_ciphertext_sub_assign(&mut permutation[col], &res);
             }
         }
 
@@ -1245,7 +1245,6 @@ impl PublicKey {
             println!("decrypted permutation {:?}", decrypted);
         }
 
-        // TODO: permutation might be backward
         self.blind_permutation(lut, permutation, ctx)
     }
 
@@ -2020,7 +2019,13 @@ mod test {
         let sorted_lut = public_key.blind_sort_bma(lut, &ctx);
         println!("sorted");
         sorted_lut.print(&private_key, &ctx);
-        // TODO: actually assert
+
+        let expected_array = vec![0, 1, 2, 3];
+        for i in 0..ctx.full_message_modulus {
+            let lwe = public_key.at(&sorted_lut, i, &ctx);
+            let actual = private_key.decrypt_lwe(&lwe, &ctx);
+            assert_eq!(actual, expected_array[i]);
+        }
     }
 
     #[test]
@@ -2035,7 +2040,13 @@ mod test {
         let sorted_lut = public_key.blind_sort_2bp(lut, &ctx);
         print!("sorted: ");
         sorted_lut.print(&private_key, &ctx);
-        // TODO: actually assert
+        
+        let expected_array = vec![2, 3, 5, 7];
+        for i in 0..4 {
+            let lwe = public_key.at(&sorted_lut, i, &ctx);
+            let actual = private_key.decrypt_lwe(&lwe, &ctx);
+            assert_eq!(actual, expected_array[i]);
+        }
     }
 
     #[test]
