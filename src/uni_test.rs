@@ -166,8 +166,7 @@ pub fn test_blind_permutation() {
         // Encrypt the permutation index
         let mut private_index: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
         for perm in &permutation_index {
-            let lwe = private_key
-                .allocate_and_encrypt_lwe((2 * ctx.message_modulus().0 as u64) - perm, &mut ctx);
+            let lwe = private_key.allocate_and_encrypt_lwe(*perm, &mut ctx);
             private_index.push(lwe);
         }
 

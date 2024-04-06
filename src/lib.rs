@@ -936,7 +936,8 @@ impl PublicKey {
         let mut many_lut = lut.to_many_lut(&self, &ctx);
         // Multi Blind Rotate
         for (lut, p) in many_lut.iter_mut().zip(permutation.iter()) {
-            blind_rotate_assign(p, &mut lut.0, &self.fourier_bsk);
+            let neg_p = self.neg_lwe(&p, &ctx);
+            blind_rotate_assign(&neg_p, &mut lut.0, &self.fourier_bsk);
         }
         // Sum all the rotated lut to get the final lut permuted
         let mut result_glwe = many_lut[0].0.clone();
@@ -1931,5 +1932,28 @@ mod test {
                 assert_eq!(actual, i);
             }
         }
+    }
+
+    #[test]
+    fn test_blind_sort_2bp() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key4();
+        let public_key = &private_key.public_key;
+
+        let n = ctx.full_message_modulus;
+
+        // read the lut as a permutation, and apply it to itself
+        let array = vec![5, 7, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        lut.print(&private_key, &ctx);
+        let permutation = Vec::from_iter((0..n).map(|i| public_key.at(&lut, i, &ctx)));
+        {
+            let v = Vec::from_iter(permutation.iter().map(|p| key4().decrypt_lwe(p, &ctx)));
+            println!("permutation: {:?}", v);
+        }
+        let lut = public_key.blind_permutation(lut, permutation, &ctx);
+
+        print!("permuted lut: ");
+        lut.print(&private_key, &ctx);
     }
 }
