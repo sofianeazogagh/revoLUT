@@ -4,12 +4,12 @@ extern crate quickcheck;
 #[macro_use(quickcheck)]
 extern crate quickcheck_macros;
 
-use std::fs;
-use std::sync::OnceLock;
 use aligned_vec::ABox;
 use num_complex::Complex;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::sync::OnceLock;
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
@@ -1248,6 +1248,46 @@ impl PublicKey {
         // TODO: permutation might be backward
         self.blind_permutation(lut, permutation, ctx)
     }
+
+    /// given a sparse but ordered lut, returns a permutation that compacts non-null values to the left
+    fn compute_compact_permutation(
+        &self,
+        lut: &LUT,
+        ctx: &Context,
+    ) -> Vec<LweCiphertext<Vec<u64>>> {
+        let n = ctx.full_message_modulus;
+        let mut cpt = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let mut permutation = vec![];
+        for i in 0..n {
+            let mut current = self.at(&lut, i, ctx);
+            let b = self.eq_scalar(&current, 0, ctx);
+            lwe_ciphertext_add_assign(&mut cpt, &b);
+            lwe_ciphertext_sub_assign(&mut current, &cpt);
+            permutation.push(current);
+        }
+        permutation
+    }
+
+    pub fn blind_sort_2bp(&self, lut: LUT, ctx: &Context) -> LUT {
+        let n = ctx.full_message_modulus;
+
+        // read the lut as a permutation, and apply it to itself
+        let permutation = Vec::from_iter((0..n).map(|i| self.at(&lut, i, &ctx)));
+        #[cfg(test)]
+        {
+            let v = Vec::from_iter(permutation.iter().map(|p| key4().decrypt_lwe(p, ctx)));
+            println!("permutation: {:?}", v);
+        }
+        let lut = self.blind_permutation(lut, permutation, ctx);
+
+        print!("permuted lut: ");
+        #[cfg(test)]
+        lut.print(key4(), ctx);
+
+        // compacts non-null values to the left
+        let second_permutation = self.compute_compact_permutation(&lut, ctx);
+        self.blind_permutation(lut, second_permutation, ctx)
+    }
 }
 
 pub struct LUT(pub GlweCiphertext<Vec<u64>>);
@@ -1981,6 +2021,51 @@ mod test {
         println!("sorted");
         sorted_lut.print(&private_key, &ctx);
         // TODO: actually assert
+    }
+
+    #[test]
+    fn test_blind_sort_2bp() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key4();
+        let public_key = &private_key.public_key;
+        let array = vec![5, 7, 3, 2];
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        lut.print(&private_key, &ctx);
+
+        let sorted_lut = public_key.blind_sort_2bp(lut, &ctx);
+        print!("sorted: ");
+        sorted_lut.print(&private_key, &ctx);
+        // TODO: actually assert
+    }
+
+    #[test]
+    fn test_compute_compact_permutation() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key4();
+        let public_key = &private_key.public_key;
+        let array = vec![0, 0, 2, 3, 0, 5, 0, 7];
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+
+        let permutation = public_key.compute_compact_permutation(&lut, &ctx);
+
+        let expected_array = vec![15, 14, 0, 1, 13, 2, 12, 3, 11, 10, 9, 8, 7, 6, 5, 4];
+        for (p, expected) in permutation.iter().zip(expected_array) {
+            let actual = private_key.decrypt_lwe(&p, &ctx);
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn test_lwe_sub_wrap() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key4();
+        let public_key = &private_key.public_key;
+        let a = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
+        let b = public_key.allocate_and_trivially_encrypt_lwe(1, &ctx);
+        let mut c = a.clone();
+        lwe_ciphertext_sub(&mut c, &a, &b);
+        let d = private_key.decrypt_lwe(&c, &ctx);
+        assert_eq!(d, 15);
     }
 
     #[quickcheck]
