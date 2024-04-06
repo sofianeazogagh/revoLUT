@@ -4,12 +4,12 @@ extern crate quickcheck;
 #[macro_use(quickcheck)]
 extern crate quickcheck_macros;
 
-use std::fs;
-use std::sync::OnceLock;
 use aligned_vec::ABox;
 use num_complex::Complex;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::sync::OnceLock;
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
@@ -495,12 +495,10 @@ impl PrivateKey {
         decrypt_glwe_ciphertext(&self.get_glwe_sk(), &input_glwe, &mut plaintext_res);
 
         // To round our 4 bits of message
-        // In the paper we return the complicated sum times -1, so here we invert that -1, otherwise we
-        // could apply the wrapping_neg on our function and remove it here
         let decoded: Vec<_> = plaintext_res
             .iter()
             .map(|x| {
-                (ctx.signed_decomposer.closest_representable(*x.0) / ctx.delta()).wrapping_neg()
+                (ctx.signed_decomposer.closest_representable(*x.0) / ctx.delta())
                     % ctx.full_message_modulus() as u64
             })
             .collect();
@@ -677,10 +675,11 @@ impl PublicKey {
 
     pub fn one_lwe_to_lwe_ciphertext_list(
         &self,
-        input_lwe: LweCiphertext<Vec<u64>>,
+        input_lwe: &LweCiphertext<Vec<u64>>,
         ctx: &Context,
     ) -> LweCiphertextList<Vec<u64>> {
-        let redundant_lwe = vec![input_lwe.into_container(); ctx.box_size()].concat();
+        let neg_lwe = self.neg_lwe(input_lwe, ctx);
+        let redundant_lwe = vec![neg_lwe.into_container(); ctx.box_size()].concat();
         let lwe_ciphertext_list = LweCiphertextList::from_container(
             redundant_lwe,
             ctx.small_lwe_dimension().to_lwe_size(),
@@ -956,16 +955,20 @@ impl PublicKey {
         for (lut, p) in many_lut.iter_mut().zip(permutation.iter()) {
             blind_rotate_assign(p, &mut lut.0, &self.fourier_bsk);
         }
-        // Sum all the rotated glwe to get the final glwe permuted
+        // Sum all the rotated lut to get the final lut permuted
         let mut result_glwe = many_lut[0].0.clone();
         for i in 1..many_lut.len() {
             result_glwe = self.glwe_sum(&result_glwe, &many_lut[i].0);
         }
 
+        // Rotation of -half_box_size to get the accurate result when we sample extract
+        let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
+        self.glwe_absorption_monic_monomial(&mut result_glwe, poly_monomial_degree);
+
         LUT(result_glwe)
     }
 
-    /// Retrieve an element from a `lut` given it `index` and return the retrieved element with the new lut
+    // Retrieve an element from a `lut` given it `index` and return the retrieved element with the new lut
     pub fn blind_retrieve(
         &self,
         lut: &mut LUT,
@@ -1263,6 +1266,10 @@ impl LUT {
         LUT(new_lut)
     }
 
+    pub fn clone(&self) -> LUT {
+        LUT(self.0.clone())
+    }
+
     fn add_redundancy_many_u64(vec: &Vec<u64>, ctx: &Context) -> Vec<u64> {
         // N/(p/2) = size of each block, to correct noise from the input we introduce the notion of
         // box, which manages redundancy to yield a denoised value for several noisy values around
@@ -1544,6 +1551,7 @@ impl LUT {
     }
 
     pub fn to_many_lut(&self, public_key: &PublicKey, ctx: &Context) -> Vec<LUT> {
+        // Extract each element from the LUT into a LWE
         let many_lwe = self.to_many_lwe(public_key, ctx);
 
         // Many-Lwe to Many-Glwe
@@ -1555,12 +1563,13 @@ impl LUT {
                 ctx.polynomial_size(),
                 ctx.ciphertext_modulus(),
             );
-            let redundancy_lwe = public_key.one_lwe_to_lwe_ciphertext_list(lwe, ctx);
+            let redundancy_lwe = public_key.one_lwe_to_lwe_ciphertext_list(&lwe, ctx);
             private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
                 &public_key.pfpksk,
                 &mut glwe,
                 &redundancy_lwe,
             );
+
             many_glwe.push(LUT(glwe));
         }
         many_glwe
@@ -1604,51 +1613,7 @@ impl LUT {
         println!("{:?}", input_vec);
     }
 
-    pub fn print_in_glwe_format(&self, private_key: &PrivateKey, ctx: &Context) {
-        let half_box_size = ctx.box_size() / 2;
-
-        let mut result_insert: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
-        result_insert.par_extend((0..ctx.full_message_modulus()).into_par_iter().map(|i| {
-            let mut lwe_sample = LweCiphertext::new(
-                0_64,
-                ctx.big_lwe_dimension().to_lwe_size(),
-                ctx.ciphertext_modulus(),
-            );
-            extract_lwe_sample_from_glwe_ciphertext(
-                &self.0,
-                &mut lwe_sample,
-                MonomialDegree((i * ctx.box_size() + half_box_size) as usize),
-            );
-            let mut switched = LweCiphertext::new(
-                0,
-                ctx.small_lwe_dimension().to_lwe_size(),
-                ctx.ciphertext_modulus(),
-            );
-            keyswitch_lwe_ciphertext(
-                &private_key.public_key.lwe_ksk,
-                &mut lwe_sample,
-                &mut switched,
-            );
-
-            // switched
-
-            // the result will be modulo 32
-            private_key.public_key.wrapping_neg_lwe(&mut switched);
-            switched
-        }));
-
-        let mut result_retrieve_u64: Vec<u64> = Vec::new();
-        for lwe in result_insert {
-            let pt = private_key.decrypt_lwe(&lwe, &ctx);
-            result_retrieve_u64.push(pt);
-        }
-
-        println!("{:?}", result_retrieve_u64);
-    }
-
     pub fn to_array(&self, private_key: &PrivateKey, ctx: &Context) -> Vec<u64> {
-        let half_box_size = ctx.box_size() / 2;
-
         let mut result_insert: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
         result_insert.par_extend((0..ctx.full_message_modulus()).into_par_iter().map(|i| {
             let mut lwe_sample = LweCiphertext::new(
@@ -1659,7 +1624,7 @@ impl LUT {
             extract_lwe_sample_from_glwe_ciphertext(
                 &self.0,
                 &mut lwe_sample,
-                MonomialDegree((i * ctx.box_size() + half_box_size) as usize),
+                MonomialDegree((i * ctx.box_size()) as usize),
             );
             let mut switched = LweCiphertext::new(
                 0,
@@ -1671,11 +1636,6 @@ impl LUT {
                 &mut lwe_sample,
                 &mut switched,
             );
-
-            // switched
-
-            // the result will be modulo 32
-            private_key.public_key.wrapping_neg_lwe(&mut switched);
             switched
         }));
 
@@ -1951,6 +1911,22 @@ mod test {
     }
 
     #[test]
+    fn test_lut_sum() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key2();
+        let array1 = vec![1, 1, 0, 0];
+        let array2 = vec![0, 0, 1, 1];
+        let lut1 = LUT::from_vec(&array1, &private_key, &mut ctx);
+        let lut2 = LUT::from_vec(&array2, &private_key, &mut ctx);
+        lut1.print(&private_key, &ctx);
+        println!("+");
+        lut2.print(&private_key, &ctx);
+        println!("=");
+        let lut_sum = lut1.add_lut(&lut2);
+        lut_sum.print(&private_key, &ctx);
+    }
+
+    #[test]
     fn test_blind_lt() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = key2();
@@ -1982,7 +1958,6 @@ mod test {
         sorted_lut.print(&private_key, &ctx);
         // TODO: actually assert
     }
-
     #[quickcheck]
     fn test_at(mut array: Vec<u64>, i: usize) -> TestResult {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
@@ -2001,5 +1976,36 @@ mod test {
         let actual = private_key.decrypt_lwe(&lwe, &ctx);
 
         TestResult::from_bool(actual == expected)
+    }
+
+    #[test]
+    fn test_blind_permutation() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key2();
+        let public_key = &private_key.public_key;
+
+        // Define the array
+        let array = vec![1, 3, 2, 0];
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        lut.print(&private_key, &ctx);
+
+        // // Define the permutation index
+        let permutation: Vec<LweCiphertext<Vec<u64>>> = array
+            .iter()
+            .map(|&x| {
+                private_key
+                    .allocate_and_encrypt_lwe((2 * ctx.full_message_modulus() as u64) - x, &mut ctx)
+            })
+            .collect();
+
+        lut.print(&private_key, &ctx);
+
+        // Make the permutation
+        let permuted = public_key.blind_permutation(lut, permutation, &ctx);
+
+        println!("permuted");
+        permuted.print(&private_key, &ctx);
+
+        // TODO: actually assert
     }
 }

@@ -23,7 +23,6 @@
 
 // mod uni_test;
 
-
 // mod blind_sort;
 // use crate::blind_sort::*;
 
@@ -43,6 +42,9 @@ use std::fs;
 use revolut::{Context, PrivateKey};
 use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
 
+// mod uni_test;
+// use uni_test::*;
+
 pub fn main() {
     println!("generating keys and saving them to disk");
     let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
@@ -53,6 +55,8 @@ pub fn main() {
     let _ = fs::write("PrivateKey2", &bincode::serialize(&private_key).unwrap());
 
     // test_blind_tensor_access();
+
+    // test_blind_permutation();
 
     // blind_array_access(); // from blind_array_access
 
