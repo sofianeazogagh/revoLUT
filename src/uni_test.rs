@@ -17,7 +17,7 @@ pub fn test_blind_retrieve() {
     let index = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
     // let (element,new_lut) = public_key.blind_retrieve(lut, index, &ctx);
     let (element, new_lut) = public_key.blind_retrieve(&mut lut, index, &ctx);
-    new_lut.print_in_glwe_format(&private_key, &ctx);
+    new_lut.print(&private_key, &ctx);
     let res = private_key.decrypt_lwe(&element, &ctx);
     println!("Got {}", res);
 }
@@ -140,11 +140,11 @@ pub fn test_blind_permutation() {
     let message_size = (ctx.message_modulus().0 - 1) as u64;
     let vector_size = ctx.full_message_modulus() as usize;
 
-    for i in 0..2 {
+    for i in 0..10 {
         println!("Test {}", i);
         let mut rng = rand::thread_rng();
 
-        // Générer des nombres aléatoires entre 0 et message_size-1
+        // Générer des nombres aléatoires entre 0 et message_size pour le vecteur d'entrée
         let array: Vec<u64> = (0..vector_size)
             .map(|_| rng.gen_range(0..=message_size)) // Génère des nombres entre 0 et 7 inclusivement
             .collect();
@@ -167,7 +167,7 @@ pub fn test_blind_permutation() {
         let mut private_index: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
         for perm in &permutation_index {
             let lwe = private_key
-                .allocate_and_encrypt_lwe((2 * ctx.full_message_modulus() as u64) - perm, &mut ctx);
+                .allocate_and_encrypt_lwe((2 * ctx.message_modulus().0 as u64) - perm, &mut ctx);
             private_index.push(lwe);
         }
 
@@ -176,6 +176,7 @@ pub fn test_blind_permutation() {
 
         // Get the permuted LUT
         let new_lut = public_key.blind_permutation(lut, private_index, &ctx);
+        new_lut.print(&private_key, &ctx);
         let results = new_lut.to_array(&private_key, &ctx);
 
         println!("From : T={:?} and pi={:?}", array, permutation_index);
