@@ -4,12 +4,12 @@ extern crate quickcheck;
 #[macro_use(quickcheck)]
 extern crate quickcheck_macros;
 
-use std::fs;
-use std::sync::OnceLock;
 use aligned_vec::ABox;
 use num_complex::Complex;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::sync::OnceLock;
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
@@ -952,10 +952,35 @@ impl PublicKey {
         ctx: &Context,
     ) -> LUT {
         let mut many_lut = lut.to_many_lut(&self, &ctx);
+
+        // #[cfg(test)]
+        // {
+        //     println!("many lut");
+        //     let key = key2();
+        //     for lut in &many_lut {
+        //         println!("{:?}", lut.to_array(key, ctx));
+        //     }
+        // }
         // Multi Blind Rotate
         for (lut, p) in many_lut.iter_mut().zip(permutation.iter()) {
+            // #[cfg(test)]
+            // {
+            //     let key = key2();
+            //     println!("blind rotate {}", key.decrypt_lwe(p, ctx));
+            //     key.debug_glwe("before rotation", &lut.0, ctx);
+            // }
             blind_rotate_assign(p, &mut lut.0, &self.fourier_bsk);
+            // #[cfg(test)]
+            // key2().debug_glwe("after rotation", &lut.0, ctx);
         }
+        // #[cfg(test)]
+        // {
+        //     println!("many lut after rotate");
+        //     let key = key2();
+        //     for lut in &many_lut {
+        //         println!("{:?}", lut.to_array(key, ctx));
+        //     }
+        // }
         // Sum all the rotated glwe to get the final glwe permuted
         let mut result_glwe = many_lut[0].0.clone();
         for i in 1..many_lut.len() {
@@ -1230,9 +1255,9 @@ impl PublicKey {
             for lin in 0..col {
                 let b = self.at(&lut, lin, ctx);
                 let res = self.blind_lt(&a, &b, ctx);
-                lwe_ciphertext_add_assign(&mut permutation[col], &res);
-                lwe_ciphertext_add_assign(&mut permutation[lin], &one);
-                lwe_ciphertext_sub_assign(&mut permutation[lin], &res);
+                lwe_ciphertext_add_assign(&mut permutation[lin], &res);
+                lwe_ciphertext_add_assign(&mut permutation[col], &one);
+                lwe_ciphertext_sub_assign(&mut permutation[col], &res);
             }
         }
 
@@ -1561,10 +1586,37 @@ impl LUT {
                 &mut glwe,
                 &redundancy_lwe,
             );
+            let poly_monomial_degree =
+                MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
+            public_key.glwe_absorption_monic_monomial(&mut glwe, poly_monomial_degree);
+
             many_glwe.push(LUT(glwe));
         }
         many_glwe
     }
+
+    // pub fn to_many_lut(&self, public_key: &PublicKey, ctx: &Context) -> Vec<LUT> {
+    //     let many_lwe = self.to_many_lwe(public_key, ctx);
+
+    //     // Many-Lwe to Many-Glwe
+    //     let mut many_glwe: Vec<LUT> = Vec::new();
+    //     for lwe in many_lwe {
+    //         let mut glwe = GlweCiphertext::new(
+    //             0_u64,
+    //             ctx.glwe_dimension().to_glwe_size(),
+    //             ctx.polynomial_size(),
+    //             ctx.ciphertext_modulus(),
+    //         );
+    //         let redundancy_lwe = public_key.one_lwe_to_lwe_ciphertext_list(lwe, ctx);
+    //         private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+    //             &public_key.pfpksk,
+    //             &mut glwe,
+    //             &redundancy_lwe,
+    //         );
+    //         many_glwe.push(LUT(glwe));
+    //     }
+    //     many_glwe
+    // }
 
     pub fn add_lut(&self, lut_r: &LUT) -> LUT {
         let ciphertext_modulus = CiphertextModulus::new_native();
@@ -1969,12 +2021,41 @@ mod test {
     }
 
     #[test]
+    fn test_blind_permutation() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key2();
+        let public_key = &private_key.public_key;
+        let array = vec![0, 2, 1, 3];
+        println!("array: {:?}", array);
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        println!("lut to_array: {:?}", lut.to_array(private_key, &ctx));
+        let permutation: Vec<LweCiphertext<Vec<u64>>> = array
+            .iter()
+            .map(|&x| {
+                private_key
+                    .allocate_and_encrypt_lwe((2 * ctx.full_message_modulus() as u64) - x, &mut ctx)
+            })
+            // .map(|&x| private_key.allocate_and_encrypt_lwe(x, &mut ctx))
+            .collect();
+        for p in &permutation {
+            println!("{}", private_key.decrypt_lwe(&p, &ctx));
+        }
+
+        let permuted = public_key.blind_permutation(lut, permutation, &ctx);
+
+        println!("permuted");
+        println!("{:?}", permuted.to_array(private_key, &ctx));
+        // TODO: actually assert
+    }
+
+    #[test]
     fn test_blind_sort_bma() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = key2();
         let public_key = &private_key.public_key;
         let array = vec![1, 3, 2, 0];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        println!("lut");
         lut.print(&private_key, &ctx);
 
         let sorted_lut = public_key.blind_sort_bma(lut, &ctx);
