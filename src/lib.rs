@@ -1838,6 +1838,7 @@ impl LUTStack {
 mod test {
     // use tfhe::core_crypto::prelude::*;
 
+    use itertools::Itertools;
     use quickcheck::TestResult;
     use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
 
@@ -2016,7 +2017,7 @@ mod test {
         let sorted_lut = public_key.blind_sort_2bp(lut, &ctx);
         print!("sorted: ");
         sorted_lut.print(&private_key, &ctx);
-        
+
         let expected_array = vec![2, 3, 5, 7];
         for i in 0..4 {
             let lwe = public_key.at(&sorted_lut, i, &ctx);
@@ -2054,6 +2055,7 @@ mod test {
         let d = private_key.decrypt_lwe(&c, &ctx);
         assert_eq!(d, 15);
     }
+
     #[quickcheck]
     fn test_at(mut array: Vec<u64>, i: usize) -> TestResult {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
@@ -2075,33 +2077,33 @@ mod test {
     }
 
     #[test]
-    fn test_blind_permutation() {
+    fn test_blind_permutation_sort_itself() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = key2();
         let public_key = &private_key.public_key;
 
-        // Define the array
-        let array = vec![1, 3, 2, 0];
-        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
-        lut.print(&private_key, &ctx);
+        for array in (0..4u64).permutations(4) {
+            let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+            print!("lut: ");
+            lut.print(&private_key, &ctx);
 
-        // // Define the permutation index
-        let permutation: Vec<LweCiphertext<Vec<u64>>> = array
-            .iter()
-            .map(|&x| {
-                private_key
-                    .allocate_and_encrypt_lwe((2 * ctx.full_message_modulus() as u64) - x, &mut ctx)
-            })
-            .collect();
+            // Define the permutation indices
+            let permutation = Vec::from_iter(
+                array
+                    .iter()
+                    .map(|&x| private_key.allocate_and_encrypt_lwe(x, &mut ctx)),
+            );
 
-        lut.print(&private_key, &ctx);
+            // Make the permutation
+            let permuted = public_key.blind_permutation(lut, permutation, &ctx);
+            print!("sorted: ");
+            permuted.print(&private_key, &ctx);
 
-        // Make the permutation
-        let permuted = public_key.blind_permutation(lut, permutation, &ctx);
-
-        println!("permuted");
-        permuted.print(&private_key, &ctx);
-
-        // TODO: actually assert
+            for i in 0..4u64 {
+                let lwe = public_key.at(&permuted, i as usize, &ctx);
+                let actual = private_key.decrypt_lwe(&lwe, &ctx);
+                assert_eq!(actual, i);
+            }
+        }
     }
 }
