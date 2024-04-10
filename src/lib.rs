@@ -8,30 +8,14 @@ use aligned_vec::ABox;
 use num_complex::Complex;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use tfhe::shortint::{CarryModulus, MessageModulus};
 use std::fs;
-use std::sync::OnceLock;
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
-use tfhe::shortint::{prelude::CiphertextModulus, prelude::*};
+use tfhe::shortint::prelude::CiphertextModulus;
 
-/// lazily compute a trivially encrypted boolean comparison matrix of the form:
-/// ```text
-/// 0 0 0
-/// 1 0 0
-/// 1 1 0
-/// ```
-fn cmp_matrix(ctx: &Context) -> &'static Vec<LUT> {
-    static MATRIX: OnceLock<Vec<LUT>> = OnceLock::new();
-    MATRIX.get_or_init(|| {
-        Vec::from_iter((0..ctx.full_message_modulus).map(|i| {
-            LUT::from_vec_trivially(
-                &Vec::from_iter((0..ctx.full_message_modulus).map(|j| if j < i { 1 } else { 0 })),
-                ctx,
-            )
-        }))
-    })
-}
+mod blind_sort;
 
 #[cfg(test)]
 fn key2() -> &'static PrivateKey {
@@ -1197,16 +1181,6 @@ impl PublicKey {
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
 
-    /// compares a and b blindly, returning a cipher of 1 if a < b else 0
-    fn blind_lt(
-        &self,
-        a: &LweCiphertext<Vec<u64>>,
-        b: &LweCiphertext<Vec<u64>>,
-        ctx: &Context,
-    ) -> LweCiphertext<Vec<u64>> {
-        self.blind_matrix_access(cmp_matrix(ctx), b, a, ctx)
-    }
-
     /// run f(ct_input), assuming lut was constructed with LUT::from_function(f)
     pub fn run_lut(
         &self,
@@ -1223,35 +1197,6 @@ impl PublicKey {
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
 
-    /// Direct Sort of distinct values
-    pub fn blind_sort_bma(&self, lut: LUT, ctx: &Context) -> LUT {
-        let n = ctx.full_message_modulus;
-        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
-        let mut permutation = vec![zero; n];
-        let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
-        for col in 0..n {
-            let a = self.at(&lut, col, ctx);
-            for lin in 0..col {
-                let b = self.at(&lut, lin, ctx);
-                let res = self.blind_lt(&a, &b, ctx);
-                lwe_ciphertext_add_assign(&mut permutation[col], &res);
-                lwe_ciphertext_add_assign(&mut permutation[lin], &one);
-                lwe_ciphertext_sub_assign(&mut permutation[lin], &res);
-            }
-        }
-
-        #[cfg(test)]
-        {
-            let private_key = key2();
-            let decrypted: Vec<u64> = (0..n)
-                .map(|i| private_key.decrypt_lwe(&permutation[i], ctx))
-                .collect();
-            println!("decrypted permutation {:?}", decrypted);
-        }
-
-        // TODO: permutation might be backward
-        self.blind_permutation(lut, permutation, ctx)
-    }
 }
 
 pub struct LUT(pub GlweCiphertext<Vec<u64>>);
@@ -1649,7 +1594,7 @@ impl LUT {
         result_retrieve_u64
     }
 
-    pub fn public_rotate_right(&mut self, rotation: u64, public_key: &PublicKey, ctx: &Context) {
+    pub fn public_rotate_right(&mut self, rotation: u64, public_key: &PublicKey) {
         public_key.glwe_absorption_monic_monomial(&mut self.0, MonomialDegree(rotation as usize));
     }
 
@@ -1798,8 +1743,9 @@ impl LUTStack {
 #[cfg(test)]
 
 mod test {
-    // use tfhe::core_crypto::prelude::*;
+    use std::time::Instant;
 
+    use itertools::Itertools;
     use quickcheck::TestResult;
     use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
 
@@ -1928,37 +1874,18 @@ mod test {
     }
 
     #[test]
-    fn test_blind_lt() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key2();
+    fn test_lwe_sub_wrap() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key4();
         let public_key = &private_key.public_key;
-
-        for a in 0..ctx.message_modulus().0 {
-            let c_a = private_key.allocate_and_encrypt_lwe(a as u64, &mut ctx);
-            for b in 0..ctx.message_modulus().0 {
-                let c_b = private_key.allocate_and_encrypt_lwe(b as u64, &mut ctx);
-                let c_res = public_key.blind_lt(&c_a, &c_b, &ctx);
-                let res = private_key.decrypt_lwe(&c_res, &ctx);
-
-                assert!(res == if a < b { 1 } else { 0 });
-            }
-        }
+        let a = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
+        let b = public_key.allocate_and_trivially_encrypt_lwe(1, &ctx);
+        let mut c = a.clone();
+        lwe_ciphertext_sub(&mut c, &a, &b);
+        let d = private_key.decrypt_lwe(&c, &ctx);
+        assert_eq!(d, 15);
     }
 
-    #[test]
-    fn test_blind_sort_bma() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key2();
-        let public_key = &private_key.public_key;
-        let array = vec![1, 3, 2, 0];
-        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
-        lut.print(&private_key, &ctx);
-
-        let sorted_lut = public_key.blind_sort_bma(lut, &ctx);
-        println!("sorted");
-        sorted_lut.print(&private_key, &ctx);
-        // TODO: actually assert
-    }
     #[quickcheck]
     fn test_at(mut array: Vec<u64>, i: usize) -> TestResult {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
@@ -1980,53 +1907,35 @@ mod test {
     }
 
     #[test]
-    fn test_blind_permutation() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key4();
+    fn test_blind_permutation_sort_itself() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key2();
         let public_key = &private_key.public_key;
 
-        // Define the array
-        // let array = vec![1, 2, 2, 0];
-        let array = vec![5, 7, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        for array in (0..4u64).permutations(4) {
+            let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+            print!("lut: ");
+            lut.print(&private_key, &ctx);
 
-        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
-        lut.print(&private_key, &ctx);
+            // Define the permutation indices
+            let permutation = Vec::from_iter(
+                array
+                    .iter()
+                    .map(|&x| private_key.allocate_and_encrypt_lwe(x, &mut ctx)),
+            );
 
-        // // Define the permutation index
-        let permutation: Vec<LweCiphertext<Vec<u64>>> = array
-            .iter()
-            .map(|&x| private_key.allocate_and_encrypt_lwe(x, &mut ctx))
-            .collect();
+            // Make the permutation
+            let begin = Instant::now();
+            let permuted = public_key.blind_permutation(lut, permutation, &ctx);
+            let elapsed = Instant::now() - begin;
+            print!("sorted ({:?}): ", elapsed);
+            permuted.print(&private_key, &ctx);
 
-        // Make the permutation
-        let permuted = public_key.blind_permutation(lut, permutation, &ctx);
-
-        println!("permuted");
-        permuted.print(&private_key, &ctx);
-
-        // TODO: actually assert
-    }
-
-    #[test]
-    fn test_blind_sort_2bp() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key4();
-        let public_key = &private_key.public_key;
-
-        let n = ctx.full_message_modulus;
-
-        // read the lut as a permutation, and apply it to itself
-        let array = vec![5, 7, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
-        lut.print(&private_key, &ctx);
-        let permutation = Vec::from_iter((0..n).map(|i| public_key.at(&lut, i, &ctx)));
-        {
-            let v = Vec::from_iter(permutation.iter().map(|p| key4().decrypt_lwe(p, &ctx)));
-            println!("permutation: {:?}", v);
+            for i in 0..4u64 {
+                let lwe = public_key.at(&permuted, i as usize, &ctx);
+                let actual = private_key.decrypt_lwe(&lwe, &ctx);
+                assert_eq!(actual, i);
+            }
         }
-        let lut = public_key.blind_permutation(lut, permutation, &ctx);
-
-        print!("permuted lut: ");
-        lut.print(&private_key, &ctx);
     }
 }
