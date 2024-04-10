@@ -86,6 +86,8 @@ impl crate::PublicKey {
         permutation
     }
 
+    /// no zero values
+    /// all (non zero) values must be distinct
     pub fn blind_sort_2bp(&self, lut: LUT, ctx: &Context) -> LUT {
         let n = ctx.full_message_modulus;
 
@@ -159,7 +161,7 @@ mod tests {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key4();
         let public_key = &private_key.public_key;
-        let array = vec![5, 7, 3, 2];
+        let array = vec![5, 7, 3, 2, 1, 0, 6, 4, 8, 10, 9, 12, 11, 15, 14, 13];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
         print!("lut: ");
         lut.print(&private_key, &ctx);
@@ -168,7 +170,7 @@ mod tests {
         print!("sorted: ");
         sorted_lut.print(&private_key, &ctx);
 
-        let expected_array = vec![2, 3, 5, 7];
+        let expected_array = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0];
         for i in 0..4 {
             let lwe = public_key.at(&sorted_lut, i, &ctx);
             let actual = private_key.decrypt_lwe(&lwe, &ctx);

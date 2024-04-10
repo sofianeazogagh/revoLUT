@@ -8,11 +8,12 @@ use aligned_vec::ABox;
 use num_complex::Complex;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use tfhe::shortint::{CarryModulus, MessageModulus};
 use std::fs;
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
-use tfhe::shortint::{prelude::CiphertextModulus, prelude::*};
+use tfhe::shortint::prelude::CiphertextModulus;
 
 mod blind_sort;
 
@@ -1742,6 +1743,8 @@ impl LUTStack {
 #[cfg(test)]
 
 mod test {
+    use std::time::Instant;
+
     use itertools::Itertools;
     use quickcheck::TestResult;
     use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
@@ -1922,8 +1925,10 @@ mod test {
             );
 
             // Make the permutation
+            let begin = Instant::now();
             let permuted = public_key.blind_permutation(lut, permutation, &ctx);
-            print!("sorted: ");
+            let elapsed = Instant::now() - begin;
+            print!("sorted ({:?}): ", elapsed);
             permuted.print(&private_key, &ctx);
 
             for i in 0..4u64 {
