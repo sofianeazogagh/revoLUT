@@ -57,7 +57,7 @@ impl crate::PublicKey {
 
         #[cfg(test)]
         {
-            let private_key = key2();
+            let private_key = key4();
             let decrypted: Vec<u64> = (0..n)
                 .map(|i| private_key.decrypt_lwe(&permutation[i], ctx))
                 .collect();
@@ -112,9 +112,9 @@ impl crate::PublicKey {
 
 #[cfg(test)]
 mod tests {
-    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
+    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_3_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
 
-    use crate::{key2, key4, Context, LUT};
+    use crate::{key2, key3, key4, Context, LUT};
 
 
     #[test]
@@ -137,10 +137,10 @@ mod tests {
 
     #[test]
     fn test_blind_sort_bma() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key2();
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key4();
         let public_key = &private_key.public_key;
-        let array = vec![1, 3, 2, 0];
+        let array = vec![1, 3, 2, 2];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
         lut.print(&private_key, &ctx);
 

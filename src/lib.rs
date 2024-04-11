@@ -17,8 +17,7 @@ use tfhe::shortint::prelude::CiphertextModulus;
 
 mod blind_sort;
 
-#[cfg(test)]
-fn key2() -> &'static PrivateKey {
+pub fn key2() -> &'static PrivateKey {
     use tfhe::shortint::parameters::PARAM_MESSAGE_2_CARRY_0;
 
     static PRIVATE_KEY2: std::sync::OnceLock<PrivateKey> = std::sync::OnceLock::new();
@@ -28,8 +27,17 @@ fn key2() -> &'static PrivateKey {
     })
 }
 
-#[cfg(test)]
-fn key4() -> &'static PrivateKey {
+pub fn key3() -> &'static PrivateKey {
+    use tfhe::shortint::parameters::PARAM_MESSAGE_3_CARRY_0;
+
+    static PRIVATE_KEY2: std::sync::OnceLock<PrivateKey> = std::sync::OnceLock::new();
+    PRIVATE_KEY2.get_or_init(|| {
+        PrivateKey::from_file("PrivateKey3")
+            .unwrap_or(PrivateKey::new(&mut Context::from(PARAM_MESSAGE_3_CARRY_0)))
+    })
+}
+
+pub fn key4() -> &'static PrivateKey {
     use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
     static PRIVATE_KEY2: std::sync::OnceLock<PrivateKey> = std::sync::OnceLock::new();
