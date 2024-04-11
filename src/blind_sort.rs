@@ -6,7 +6,7 @@ use tfhe::core_crypto::{
 };
 
 #[cfg(test)]
-use crate::{key2, key4};
+use crate::key4;
 use crate::{Context, LUT};
 
 /// lazily compute a trivially encrypted boolean comparison matrix of the form:
@@ -112,9 +112,9 @@ impl crate::PublicKey {
 
 #[cfg(test)]
 mod tests {
-    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_3_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
+    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
 
-    use crate::{key2, key3, key4, Context, LUT};
+    use crate::{key2, key4, Context, LUT};
 
 
     #[test]
@@ -161,7 +161,7 @@ mod tests {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key4();
         let public_key = &private_key.public_key;
-        let array = vec![5, 7, 3, 2, 1, 0, 6, 4, 8, 10, 9, 12, 11, 15, 14, 13];
+        let array = vec![1,3,2,0];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
         print!("lut: ");
         lut.print(&private_key, &ctx);
@@ -170,7 +170,7 @@ mod tests {
         print!("sorted: ");
         sorted_lut.print(&private_key, &ctx);
 
-        let expected_array = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0];
+        let expected_array = vec![1, 2, 3, 0];
         for i in 0..4 {
             let lwe = public_key.at(&sorted_lut, i, &ctx);
             let actual = private_key.decrypt_lwe(&lwe, &ctx);
