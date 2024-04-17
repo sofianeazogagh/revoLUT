@@ -92,9 +92,11 @@ impl crate::PublicKey {
 
 #[cfg(test)]
 mod tests {
-    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
+    use std::time::Instant;
 
-    use crate::{key2, key4, Context, LUT};
+    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0, PARAM_MESSAGE_5_CARRY_0};
+
+    use crate::{key2, key4, key5, Context, LUT};
 
 
     #[test]
@@ -107,7 +109,10 @@ mod tests {
             let c_a = private_key.allocate_and_encrypt_lwe(a as u64, &mut ctx);
             for b in 0..ctx.message_modulus().0 {
                 let c_b = private_key.allocate_and_encrypt_lwe(b as u64, &mut ctx);
+                let begin = Instant::now();
                 let c_res = public_key.blind_lt(&c_a, &c_b, &ctx);
+                let elapsed = Instant::now() - begin;
+                println!("elapsed: {:?}", elapsed);
                 let res = private_key.decrypt_lwe(&c_res, &ctx);
 
                 assert!(res == if a < b { 1 } else { 0 });
@@ -138,16 +143,18 @@ mod tests {
 
     #[test]
     fn test_blind_sort_2bp() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key4();
+        let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
+        let private_key = key5();
         let public_key = &private_key.public_key;
         let array = vec![1,3,2,0];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
         print!("lut: ");
         lut.print(&private_key, &ctx);
 
+        let begin = Instant::now();
         let sorted_lut = public_key.blind_sort_2bp(lut, &ctx);
-        print!("sorted: ");
+        let elapsed = Instant::now() - begin;
+        print!("sorted {:?}: ", elapsed);
         sorted_lut.print(&private_key, &ctx);
 
         let expected_array = vec![1, 2, 3, 0];

@@ -8,8 +8,8 @@ use aligned_vec::ABox;
 use num_complex::Complex;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use tfhe::shortint::{CarryModulus, MessageModulus};
 use std::fs;
+use tfhe::shortint::{CarryModulus, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
@@ -44,6 +44,16 @@ pub fn key4() -> &'static PrivateKey {
     PRIVATE_KEY2.get_or_init(|| {
         PrivateKey::from_file("PrivateKey4")
             .unwrap_or(PrivateKey::new(&mut Context::from(PARAM_MESSAGE_4_CARRY_0)))
+    })
+}
+
+pub fn key5() -> &'static PrivateKey {
+    use tfhe::shortint::parameters::PARAM_MESSAGE_5_CARRY_0;
+
+    static PRIVATE_KEY2: std::sync::OnceLock<PrivateKey> = std::sync::OnceLock::new();
+    PRIVATE_KEY2.get_or_init(|| {
+        PrivateKey::from_file("PrivateKey5")
+            .unwrap_or(PrivateKey::new(&mut Context::from(PARAM_MESSAGE_5_CARRY_0)))
     })
 }
 
@@ -1204,7 +1214,6 @@ impl PublicKey {
         programmable_bootstrap_lwe_ciphertext(&ct_input, &mut lwe, &lut.0, &self.fourier_bsk);
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
-
 }
 
 pub struct LUT(pub GlweCiphertext<Vec<u64>>);
@@ -1755,7 +1764,7 @@ mod test {
 
     use itertools::Itertools;
     use quickcheck::TestResult;
-    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
+    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_3_CARRY_0, PARAM_MESSAGE_4_CARRY_0, PARAM_MESSAGE_5_CARRY_0};
 
     use super::*;
 
@@ -1912,6 +1921,28 @@ mod test {
         let actual = private_key.decrypt_lwe(&lwe, &ctx);
 
         TestResult::from_bool(actual == expected)
+    }
+
+    #[test]
+    fn test_blind_permutation_time() {
+        let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
+        let private_key = key5();
+        let public_key = &private_key.public_key;
+        // let array = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let array = Vec::from_iter(0..32);
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        let permutation = Vec::from_iter(
+            array
+                .iter()
+                .map(|&x| private_key.allocate_and_encrypt_lwe(x, &mut ctx)),
+        );
+
+        let begin = Instant::now();
+        let permuted = public_key.blind_permutation(lut, permutation, &ctx);
+        let elapsed = Instant::now() - begin;
+
+        print!("sorted ({:?}): ", elapsed);
+        permuted.print(&private_key, &ctx);
     }
 
     #[test]
