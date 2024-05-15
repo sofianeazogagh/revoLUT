@@ -1196,6 +1196,21 @@ impl PublicKey {
         programmable_bootstrap_lwe_ciphertext(&ct_input, &mut lwe, &lut.0, &self.fourier_bsk);
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
+
+    /// blindly adds x to the i-th coefficient of the given LUT
+    pub fn blind_array_add(
+        &self,
+        lut: &mut LUT,
+        i: &LweCiphertext<Vec<u64>>,
+        x: &LweCiphertext<Vec<u64>>,
+        ctx: &Context,
+    ) {
+        let neg_x = self.neg_lwe(x, ctx);
+        let mut other = LUT::from_lwe(&neg_x, &self, ctx);
+        let neg_i = self.neg_lwe(i, ctx);
+        blind_rotate_assign(&neg_i, &mut other.0, &self.fourier_bsk);
+        self.glwe_sum_assign(&mut lut.0, &other.0);
+    }
 }
 
 pub struct LUT(pub GlweCiphertext<Vec<u64>>);
@@ -1958,5 +1973,42 @@ mod test {
                 assert_eq!(actual, i);
             }
         }
+    }
+
+    fn blind_array_add_prop(mut array: Vec<u64>, i: u64, x: u64) -> bool {
+        let param = PARAM_MESSAGE_4_CARRY_0;
+        let size = param.message_modulus.0;
+        let mut ctx = Context::from(param);
+        let private_key = key(param);
+        let public_key = &private_key.public_key;
+
+        let lwe_i = private_key.allocate_and_encrypt_lwe(i, &mut ctx);
+        let lwe_x = private_key.allocate_and_encrypt_lwe(x, &mut ctx);
+        let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
+
+        public_key.blind_array_add(&mut lut, &lwe_i, &lwe_x, &ctx);
+        array[i as usize] = (array[i as usize] + x) % size as u64;
+
+        (0..array.len()).all(|idx| {
+            let lwe = public_key.at(&lut, idx, &ctx);
+            let actual = private_key.decrypt_lwe(&lwe, &ctx);
+            // println!("{}: {} == {}", idx, actual, array[idx]);
+            actual == array[idx]
+        })
+    }
+
+    #[quickcheck]
+    fn test_blind_array_add_quickcheck(mut array: Vec<u64>, i: u64, x: u64) -> TestResult {
+        let param = PARAM_MESSAGE_4_CARRY_0;
+        let size = param.message_modulus.0;
+        if array.len() == 0 {
+            return TestResult::discard()
+        }
+        array.truncate(size);
+        array.iter_mut().for_each(|v| *v %= size as u64);
+        let i = i % array.len() as u64;
+        let x = x % size as u64;
+        // println!("{} {} {:?}", i, x, array);
+        TestResult::from_bool(blind_array_add_prop(array, i, x))
     }
 }
