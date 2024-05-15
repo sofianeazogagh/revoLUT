@@ -30,5 +30,13 @@ criterion = { version = "0.4", features = ["html_reports"] }
 
 
 [[bench]]
-name = "benchmarks"
+name = "bma"
+harness = false
+
+[[bench]]
+name = "2bp"
+harness = false
+
+[[bench]]
+name = "bp"
 harness = false

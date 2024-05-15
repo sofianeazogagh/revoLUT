@@ -94,15 +94,13 @@ impl crate::PublicKey {
 mod tests {
     use std::time::Instant;
 
-    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0, PARAM_MESSAGE_5_CARRY_0};
-
-    use crate::{key2, key4, key5, Context, LUT};
-
+    use crate::*;
+    use tfhe::shortint::parameters::*;
 
     #[test]
     fn test_blind_lt() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key2();
+        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
         let public_key = &private_key.public_key;
 
         for a in 0..ctx.message_modulus().0 {
@@ -123,7 +121,7 @@ mod tests {
     #[test]
     fn test_blind_sort_bma() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key2();
+        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
         let public_key = &private_key.public_key;
         let array = vec![1, 3, 2, 2];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
@@ -143,10 +141,10 @@ mod tests {
 
     #[test]
     fn test_blind_sort_2bp() {
-        let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
-        let private_key = key5();
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
         let public_key = &private_key.public_key;
-        let array = vec![1,3,2,0];
+        let array = vec![1, 3, 2, 0];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
         print!("lut: ");
         lut.print(&private_key, &ctx);
@@ -168,7 +166,7 @@ mod tests {
     #[test]
     fn test_compute_compact_permutation() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key4();
+        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
         let public_key = &private_key.public_key;
         let array = vec![0, 0, 2, 3, 0, 5, 0, 7];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
