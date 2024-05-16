@@ -22,4 +22,20 @@ rustup override set nightly
 cargo build
 ```
 
+## Generate PrivateKey files
 
+```bash
+cargo run --release
+```
+
+## Running tests
+
+```bash
+cargo test --release TEST_NAME -- --nocapture
+```
+
+## Running benchmarks
+
+```bash
+cargo bench --bench BENCH_NAME
+```

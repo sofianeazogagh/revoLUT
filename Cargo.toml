@@ -24,10 +24,19 @@ serde = { version = "1.0", features = ["derive"] }
 rand = "0.8"
 
 [dev-dependencies]
-# criterion = "0.3"
 quickcheck = "1"
 quickcheck_macros = "1"
+criterion = { version = "0.4", features = ["html_reports"] }
 
-# [[bench]]
-# name = "benchmarks"
-# harness = false
+
+[[bench]]
+name = "bma"
+harness = false
+
+[[bench]]
+name = "2bp"
+harness = false
+
+[[bench]]
+name = "bp"
+harness = false

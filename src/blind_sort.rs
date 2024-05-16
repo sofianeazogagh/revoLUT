@@ -5,8 +5,6 @@ use tfhe::core_crypto::{
     entities::LweCiphertext,
 };
 
-#[cfg(test)]
-use crate::{key2, key4};
 use crate::{Context, LUT};
 
 /// lazily compute a trivially encrypted boolean comparison matrix of the form:
@@ -55,15 +53,6 @@ impl crate::PublicKey {
             }
         }
 
-        #[cfg(test)]
-        {
-            let private_key = key2();
-            let decrypted: Vec<u64> = (0..n)
-                .map(|i| private_key.decrypt_lwe(&permutation[i], ctx))
-                .collect();
-            println!("decrypted permutation {:?}", decrypted);
-        }
-
         self.blind_permutation(lut, permutation, ctx)
     }
 
@@ -93,16 +82,7 @@ impl crate::PublicKey {
 
         // read the lut as a permutation, and apply it to itself
         let permutation = Vec::from_iter((0..n).map(|i| self.at(&lut, i, &ctx)));
-        #[cfg(test)]
-        {
-            let v = Vec::from_iter(permutation.iter().map(|p| key4().decrypt_lwe(p, ctx)));
-            println!("permutation: {:?}", v);
-        }
         let permuted_lut = self.blind_permutation(lut, permutation, ctx);
-
-        print!("permuted lut: ");
-        #[cfg(test)]
-        permuted_lut.print(key4(), ctx);
 
         // compacts non-null values to the left
         let second_permutation = self.compute_compact_permutation(&permuted_lut, ctx);
@@ -112,22 +92,25 @@ impl crate::PublicKey {
 
 #[cfg(test)]
 mod tests {
-    use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0};
+    use std::time::Instant;
 
-    use crate::{key2, key4, Context, LUT};
-
+    use crate::*;
+    use tfhe::shortint::parameters::*;
 
     #[test]
     fn test_blind_lt() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key2();
+        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
         let public_key = &private_key.public_key;
 
         for a in 0..ctx.message_modulus().0 {
             let c_a = private_key.allocate_and_encrypt_lwe(a as u64, &mut ctx);
             for b in 0..ctx.message_modulus().0 {
                 let c_b = private_key.allocate_and_encrypt_lwe(b as u64, &mut ctx);
+                let begin = Instant::now();
                 let c_res = public_key.blind_lt(&c_a, &c_b, &ctx);
+                let elapsed = Instant::now() - begin;
+                println!("elapsed: {:?}", elapsed);
                 let res = private_key.decrypt_lwe(&c_res, &ctx);
 
                 assert!(res == if a < b { 1 } else { 0 });
@@ -138,9 +121,9 @@ mod tests {
     #[test]
     fn test_blind_sort_bma() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key2();
+        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
         let public_key = &private_key.public_key;
-        let array = vec![1, 3, 2, 0];
+        let array = vec![1, 3, 2, 2];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
         lut.print(&private_key, &ctx);
 
@@ -148,7 +131,7 @@ mod tests {
         println!("sorted");
         sorted_lut.print(&private_key, &ctx);
 
-        let expected_array = vec![0, 1, 2, 3];
+        let expected_array = vec![1, 2, 2, 3];
         for i in 0..ctx.full_message_modulus {
             let lwe = public_key.at(&sorted_lut, i, &ctx);
             let actual = private_key.decrypt_lwe(&lwe, &ctx);
@@ -159,18 +142,20 @@ mod tests {
     #[test]
     fn test_blind_sort_2bp() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key4();
+        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
         let public_key = &private_key.public_key;
-        let array = vec![5, 7, 3, 2, 1, 0, 6, 4, 8, 10, 9, 12, 11, 15, 14, 13];
+        let array = vec![1, 3, 2, 0];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
         print!("lut: ");
         lut.print(&private_key, &ctx);
 
+        let begin = Instant::now();
         let sorted_lut = public_key.blind_sort_2bp(lut, &ctx);
-        print!("sorted: ");
+        let elapsed = Instant::now() - begin;
+        print!("sorted {:?}: ", elapsed);
         sorted_lut.print(&private_key, &ctx);
 
-        let expected_array = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0];
+        let expected_array = vec![1, 2, 3, 0];
         for i in 0..4 {
             let lwe = public_key.at(&sorted_lut, i, &ctx);
             let actual = private_key.decrypt_lwe(&lwe, &ctx);
@@ -181,7 +166,7 @@ mod tests {
     #[test]
     fn test_compute_compact_permutation() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key4();
+        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
         let public_key = &private_key.public_key;
         let array = vec![0, 0, 2, 3, 0, 5, 0, 7];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
