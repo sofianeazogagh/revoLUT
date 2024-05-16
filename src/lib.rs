@@ -108,10 +108,10 @@ impl Context {
         self.parameters.polynomial_size
     }
     pub fn lwe_modular_std_dev(&self) -> StandardDev {
-        self.parameters.lwe_modular_std_dev
+        self.parameters.lwe_noise_distribution.gaussian_std_dev()
     }
     pub fn glwe_modular_std_dev(&self) -> StandardDev {
-        self.parameters.glwe_modular_std_dev
+        self.parameters.glwe_noise_distribution.gaussian_std_dev()
     }
     pub fn pbs_base_log(&self) -> DecompositionBaseLog {
         self.parameters.pbs_base_log
@@ -132,7 +132,7 @@ impl Context {
         self.parameters.pbs_base_log
     }
     pub fn pfks_modular_std_dev(&self) -> StandardDev {
-        self.parameters.glwe_modular_std_dev
+        self.parameters.glwe_noise_distribution.gaussian_std_dev()
     }
     pub fn message_modulus(&self) -> MessageModulus {
         self.parameters.message_modulus
@@ -192,7 +192,7 @@ impl PrivateKey {
             &glwe_sk,
             ctx.pbs_base_log(),
             ctx.pbs_level(),
-            ctx.glwe_modular_std_dev(),
+            ctx.parameters.glwe_noise_distribution,
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
@@ -225,7 +225,7 @@ impl PrivateKey {
             &big_lwe_sk,
             &small_lwe_sk,
             &mut lwe_ksk,
-            ctx.lwe_modular_std_dev(),
+            ctx.parameters.lwe_noise_distribution,
             &mut ctx.encryption_generator,
         );
 
@@ -251,7 +251,7 @@ impl PrivateKey {
             &small_lwe_sk,
             &glwe_sk,
             &mut pfpksk,
-            ctx.pfks_modular_std_dev(),
+            ctx.parameters.glwe_noise_distribution,
             &mut ctx.encryption_generator,
             |x| x,
             &last_polynomial,
@@ -262,7 +262,7 @@ impl PrivateKey {
             &glwe_sk,
             ctx.pfks_base_log(),
             ctx.pfks_level(),
-            ctx.pfks_modular_std_dev(),
+            ctx.parameters.glwe_noise_distribution,
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
@@ -314,7 +314,7 @@ impl PrivateKey {
         let lwe_ciphertext: LweCiphertextOwned<u64> = allocate_and_encrypt_new_lwe_ciphertext(
             &self.small_lwe_sk,
             plaintext,
-            ctx.lwe_modular_std_dev(),
+            ctx.parameters.lwe_noise_distribution,
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
@@ -332,7 +332,7 @@ impl PrivateKey {
         let lwe_ciphertext: LweCiphertextOwned<u64> = allocate_and_encrypt_new_lwe_ciphertext(
             &self.big_lwe_sk,
             plaintext,
-            ctx.lwe_modular_std_dev(),
+            ctx.parameters.lwe_noise_distribution,
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
@@ -386,7 +386,7 @@ impl PrivateKey {
             self.get_glwe_sk(),
             &mut output_glwe,
             &pt_list,
-            ctx.glwe_modular_std_dev(),
+            ctx.parameters.glwe_noise_distribution,
             &mut ctx.encryption_generator,
         );
         output_glwe
@@ -402,7 +402,7 @@ impl PrivateKey {
             self.get_glwe_sk(),
             output_glwe,
             &pt,
-            ctx.glwe_modular_std_dev(),
+            ctx.parameters.glwe_noise_distribution,
             &mut ctx.encryption_generator,
         );
     }
@@ -1171,7 +1171,7 @@ impl PublicKey {
     }
 
     /// returns the ciphertext at index i from the given lut, accounting for redundancy
-    fn at(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
+    fn sample_extract(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
         let mut lwe = LweCiphertext::new(
             0u64,
             ctx.big_lwe_dimension.to_lwe_size(),
@@ -1470,7 +1470,7 @@ impl LUT {
             ctx.ciphertext_modulus(),
         );
         // Keyswitch and pack
-        private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
             &mut glwe,
             &lwe_ciphertext_list,
@@ -1914,7 +1914,7 @@ mod test {
 
         let expected = array[i];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
-        let lwe = public_key.at(&lut, i, &ctx);
+        let lwe = public_key.sample_extract(&lut, i, &ctx);
         let actual = private_key.decrypt_lwe(&lwe, &ctx);
 
         TestResult::from_bool(actual == expected)
@@ -1968,7 +1968,7 @@ mod test {
             permuted.print(&private_key, &ctx);
 
             for i in 0..4u64 {
-                let lwe = public_key.at(&permuted, i as usize, &ctx);
+                let lwe = public_key.sample_extract(&permuted, i as usize, &ctx);
                 let actual = private_key.decrypt_lwe(&lwe, &ctx);
                 assert_eq!(actual, i);
             }
@@ -1990,7 +1990,7 @@ mod test {
         array[i as usize] = (array[i as usize] + x) % size as u64;
 
         (0..array.len()).all(|idx| {
-            let lwe = public_key.at(&lut, idx, &ctx);
+            let lwe = public_key.sample_extract(&lut, idx, &ctx);
             let actual = private_key.decrypt_lwe(&lwe, &ctx);
             // println!("{}: {} == {}", idx, actual, array[idx]);
             actual == array[idx]

@@ -43,9 +43,9 @@ impl crate::PublicKey {
         let mut permutation = vec![zero; n];
         let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
         for col in 0..n {
-            let a = self.at(&lut, col, ctx);
+            let a = self.sample_extract(&lut, col, ctx);
             for lin in 0..col {
-                let b = self.at(&lut, lin, ctx);
+                let b = self.sample_extract(&lut, lin, ctx);
                 let res = self.blind_lt(&a, &b, ctx);
                 lwe_ciphertext_add_assign(&mut permutation[lin], &res);
                 lwe_ciphertext_add_assign(&mut permutation[col], &one);
@@ -66,7 +66,7 @@ impl crate::PublicKey {
         let mut cpt = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let mut permutation = vec![];
         for i in 0..n {
-            let mut current = self.at(&lut, i, ctx);
+            let mut current = self.sample_extract(&lut, i, ctx);
             let b = self.eq_scalar(&current, 0, ctx);
             lwe_ciphertext_add_assign(&mut cpt, &b);
             lwe_ciphertext_sub_assign(&mut current, &cpt);
@@ -81,12 +81,49 @@ impl crate::PublicKey {
         let n = ctx.full_message_modulus;
 
         // read the lut as a permutation, and apply it to itself
-        let permutation = Vec::from_iter((0..n).map(|i| self.at(&lut, i, &ctx)));
+        let permutation = Vec::from_iter((0..n).map(|i| self.sample_extract(&lut, i, &ctx)));
         let permuted_lut = self.blind_permutation(lut, permutation, ctx);
 
         // compacts non-null values to the left
         let second_permutation = self.compute_compact_permutation(&permuted_lut, ctx);
         self.blind_permutation(permuted_lut, second_permutation, ctx)
+    }
+
+    pub fn blind_counting_sort(&self, lut: LUT, ctx: &Context) -> LUT {
+        let n = ctx.full_message_modulus;
+        let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
+        let mut count = LUT::from_vec_trivially(&vec![0; n], ctx);
+
+        // step 1: count values
+        println!("counting values");
+        for i in 0..n {
+            let x = self.sample_extract(&lut, i, ctx);
+            self.blind_array_add(&mut count, &x, &one, ctx);
+        }
+
+        // step 2: sort
+        println!("step 2: sorting");
+        let mut result = LUT::from_vec_trivially(&vec![0; n], ctx);
+        let mut i = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let mut j = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let isnull = LUT::from_function(|v| if v == 0 { 1 } else { 0 }, ctx);
+
+        for idx in 0..2*n - 1 {
+            println!("{}", idx);
+            let x = self.blind_array_access(&i, &count, ctx);
+            let b = self.run_lut(&x, &isnull, ctx);
+            let mut notb = one.clone();
+            lwe_ciphertext_sub_assign(&mut notb, &b);
+            let f = LUT::from_lwe(&i, &self, &ctx);
+            let y = self.run_lut(&b, &f, ctx);
+            self.blind_array_add(&mut result, &j, &y, ctx);
+            let minusnotb = self.neg_lwe(&notb, ctx);
+            self.blind_array_add(&mut count, &i, &minusnotb, ctx);
+            lwe_ciphertext_add_assign(&mut i, &b);
+            lwe_ciphertext_add_assign(&mut j, &notb);
+        }
+
+        result
     }
 }
 
@@ -133,7 +170,7 @@ mod tests {
 
         let expected_array = vec![1, 2, 2, 3];
         for i in 0..ctx.full_message_modulus {
-            let lwe = public_key.at(&sorted_lut, i, &ctx);
+            let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
             let actual = private_key.decrypt_lwe(&lwe, &ctx);
             assert_eq!(actual, expected_array[i]);
         }
@@ -157,7 +194,7 @@ mod tests {
 
         let expected_array = vec![1, 2, 3, 0];
         for i in 0..4 {
-            let lwe = public_key.at(&sorted_lut, i, &ctx);
+            let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
             let actual = private_key.decrypt_lwe(&lwe, &ctx);
             assert_eq!(actual, expected_array[i]);
         }
@@ -177,6 +214,25 @@ mod tests {
         for (p, expected) in permutation.iter().zip(expected_array) {
             let actual = private_key.decrypt_lwe(&p, &ctx);
             assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn test_blind_counting_sort() {
+        let param = PARAM_MESSAGE_4_CARRY_0;
+        let mut ctx = Context::from(param);
+        let private_key = key(param);
+        let public_key = &private_key.public_key;
+        let array = vec![3, 2, 1, 2];
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+
+        let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+
+        let expected_array = vec![1, 2, 2, 3];
+        for i in 0..array.len() {
+            let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
+            let actual = private_key.decrypt_lwe(&lwe, &ctx);
+            assert_eq!(actual, expected_array[i]);
         }
     }
 }
