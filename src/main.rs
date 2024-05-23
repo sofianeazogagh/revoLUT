@@ -37,28 +37,31 @@
 
 // mod headers;
 
-// use std::fs;
+use std::{fs, time::Instant};
 
-use revolut::{key, Context, LUT};
+use revolut::*;
 use tfhe::shortint::parameters::*;
 
 // mod uni_test;
 // use uni_test::*;
 
+pub fn generate_keys() {
+    println!("generating keys and saving them to disk");
+    let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+    let private_key = PrivateKey::new(&mut ctx); // this takes time
+    let _ = fs::write("PrivateKey2", &bincode::serialize(&private_key).unwrap());
+    let mut ctx = Context::from(PARAM_MESSAGE_3_CARRY_0);
+    let private_key = PrivateKey::new(&mut ctx); // this takes time
+    let _ = fs::write("PrivateKey3", &bincode::serialize(&private_key).unwrap());
+    let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+    let private_key = PrivateKey::new(&mut ctx); // this takes time
+    let _ = fs::write("PrivateKey4", &bincode::serialize(&private_key).unwrap());
+    let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
+    let private_key = PrivateKey::new(&mut ctx); // this takes time
+    let _ = fs::write("PrivateKey5", &bincode::serialize(&private_key).unwrap());
+}
+
 pub fn main() {
-    // println!("generating keys and saving them to disk");
-    // let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-    // let private_key = PrivateKey::new(&mut ctx); // this takes time
-    // let _ = fs::write("PrivateKey2", &bincode::serialize(&private_key).unwrap());
-    // let mut ctx = Context::from(PARAM_MESSAGE_3_CARRY_0);
-    // let private_key = PrivateKey::new(&mut ctx); // this takes time
-    // let _ = fs::write("PrivateKey3", &bincode::serialize(&private_key).unwrap());
-    // let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-    // let private_key = PrivateKey::new(&mut ctx); // this takes time
-    // let _ = fs::write("PrivateKey4", &bincode::serialize(&private_key).unwrap());
-    // let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
-    // let private_key = PrivateKey::new(&mut ctx); // this takes time
-    // let _ = fs::write("PrivateKey5", &bincode::serialize(&private_key).unwrap());
     let param = PARAM_MESSAGE_4_CARRY_0;
     let mut ctx = Context::from(param);
     let private_key = key(param);
@@ -66,7 +69,11 @@ pub fn main() {
     let array = vec![3, 2, 1, 2];
     let lut = LUT::from_vec(&array, &private_key, &mut ctx);
 
-    let _ = public_key.blind_counting_sort(lut, &ctx);
+    let now = Instant::now();
+    let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+    println!("{:?}", Instant::now() - now);
+
+    sorted_lut.print(&private_key, &ctx);
 
     // test_blind_tensor_access();
 

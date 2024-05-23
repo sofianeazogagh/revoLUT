@@ -108,7 +108,7 @@ impl crate::PublicKey {
         let mut j = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let isnull = LUT::from_function(|v| if v == 0 { 1 } else { 0 }, ctx);
 
-        for idx in 0..2*n - 1 {
+        for idx in 0..2 * n {
             println!("{}", idx);
             let x = self.blind_array_access(&i, &count, ctx);
             let b = self.run_lut(&x, &isnull, ctx);
@@ -219,20 +219,25 @@ mod tests {
 
     #[test]
     fn test_blind_counting_sort() {
-        let param = PARAM_MESSAGE_4_CARRY_0;
+        let param = PARAM_MESSAGE_3_CARRY_0;
         let mut ctx = Context::from(param);
         let private_key = key(param);
         let public_key = &private_key.public_key;
-        let array = vec![3, 2, 1, 2];
-        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        let array = vec![2, 1, 3, 1, 0, 0, 0, 0];
 
-        let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+        loop {
+            let lut = LUT::from_vec(&array, &private_key, &mut ctx);
 
-        let expected_array = vec![1, 2, 2, 3];
-        for i in 0..array.len() {
-            let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
-            let actual = private_key.decrypt_lwe(&lwe, &ctx);
-            assert_eq!(actual, expected_array[i]);
+            let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+            private_key.debug_glwe("string", &sorted_lut.0, &ctx);
+
+            let expected_array = vec![0, 0, 0, 0, 1, 1, 2, 3];
+            for i in 0..array.len() {
+                let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
+                let actual = private_key.decrypt_lwe(&lwe, &ctx);
+                println!("{}", actual);
+                assert_eq!(actual, expected_array[i]);
+            }
         }
     }
 }

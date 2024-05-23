@@ -1205,8 +1205,7 @@ impl PublicKey {
         x: &LweCiphertext<Vec<u64>>,
         ctx: &Context,
     ) {
-        let neg_x = self.neg_lwe(x, ctx);
-        let mut other = LUT::from_lwe(&neg_x, &self, ctx);
+        let mut other = LUT::from_lwe(&x, &self, ctx);
         let neg_i = self.neg_lwe(i, ctx);
         blind_rotate_assign(&neg_i, &mut other.0, &self.fourier_bsk);
         self.glwe_sum_assign(&mut lut.0, &other.0);
@@ -1476,7 +1475,7 @@ impl LUT {
             &lwe_ciphertext_list,
         );
 
-        let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
+        let poly_monomial_degree = MonomialDegree(ctx.polynomial_size().0 - ctx.box_size() / 2);
         public_key.glwe_absorption_monic_monomial(&mut glwe, poly_monomial_degree);
 
         LUT(glwe)
@@ -1830,16 +1829,20 @@ mod test {
     }
 
     #[test]
-    fn test_lwe_to_lut() {
+    fn test_lut_from_lwe() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(PARAM_MESSAGE_4_CARRY_0);
         let public_key = &private_key.public_key;
-        let our_input = 8u64;
-        let lwe = private_key.allocate_and_encrypt_lwe(our_input, &mut ctx);
-        let lut = LUT::from_lwe(&lwe, public_key, &ctx);
-        let output_pt = private_key.decrypt_and_decode_glwe(&lut.0, &ctx);
-        println!("Test LWE to LUT");
-        println!("{:?}", output_pt);
+
+        for i in 0u64..16u64 {
+            let lwe = private_key.allocate_and_encrypt_lwe(i, &mut ctx);
+            let lut = LUT::from_lwe(&lwe, public_key, &ctx);
+            for j in 0..16u64 {
+                let output = public_key.sample_extract(&lut, j as usize, &ctx);
+                let actual = private_key.decrypt_lwe(&output, &ctx);
+                assert_eq!(actual, if j == 0 { i } else { 0 });
+            }
+        }
     }
 
     #[test]
@@ -1976,7 +1979,7 @@ mod test {
     }
 
     fn blind_array_add_prop(mut array: Vec<u64>, i: u64, x: u64) -> bool {
-        let param = PARAM_MESSAGE_4_CARRY_0;
+        let param = PARAM_MESSAGE_2_CARRY_0;
         let size = param.message_modulus.0;
         let mut ctx = Context::from(param);
         let private_key = key(param);
@@ -1986,20 +1989,22 @@ mod test {
         let lwe_x = private_key.allocate_and_encrypt_lwe(x, &mut ctx);
         let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
 
+        lut.print(&private_key, &ctx);
         public_key.blind_array_add(&mut lut, &lwe_i, &lwe_x, &ctx);
+        lut.print(&private_key, &ctx);
         array[i as usize] = (array[i as usize] + x) % size as u64;
 
         (0..array.len()).all(|idx| {
             let lwe = public_key.sample_extract(&lut, idx, &ctx);
             let actual = private_key.decrypt_lwe(&lwe, &ctx);
-            // println!("{}: {} == {}", idx, actual, array[idx]);
+            println!("{}: {} == {}", idx, actual, array[idx]);
             actual == array[idx]
         })
     }
 
     #[quickcheck]
     fn test_blind_array_add_quickcheck(mut array: Vec<u64>, i: u64, x: u64) -> TestResult {
-        let param = PARAM_MESSAGE_4_CARRY_0;
+        let param = PARAM_MESSAGE_2_CARRY_0;
         let size = param.message_modulus.0;
         if array.len() == 0 {
             return TestResult::discard()
@@ -2008,7 +2013,7 @@ mod test {
         array.iter_mut().for_each(|v| *v %= size as u64);
         let i = i % array.len() as u64;
         let x = x % size as u64;
-        // println!("{} {} {:?}", i, x, array);
+        println!("{} {} {:?}", i, x, array);
         TestResult::from_bool(blind_array_add_prop(array, i, x))
     }
 }
