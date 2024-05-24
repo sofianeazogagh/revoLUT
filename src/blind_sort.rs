@@ -95,21 +95,21 @@ impl crate::PublicKey {
         let mut count = LUT::from_vec_trivially(&vec![0; n], ctx);
 
         // step 1: count values
-        println!("counting values");
+        // println!("counting values");
         for i in 0..n {
             let x = self.sample_extract(&lut, i, ctx);
             self.blind_array_add(&mut count, &x, &one, ctx);
         }
 
         // step 2: sort
-        println!("step 2: sorting");
+        // println!("step 2: sorting");
         let mut result = LUT::from_vec_trivially(&vec![0; n], ctx);
         let mut i = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let mut j = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let isnull = LUT::from_function(|v| if v == 0 { 1 } else { 0 }, ctx);
 
-        for idx in 0..2 * n {
-            println!("{}", idx);
+        for _idx in 0..2 * n {
+            // println!("{}", idx);
             let x = self.blind_array_access(&i, &count, ctx);
             let b = self.run_lut(&x, &isnull, ctx);
             let mut notb = one.clone();
@@ -225,19 +225,16 @@ mod tests {
         let public_key = &private_key.public_key;
         let array = vec![2, 1, 3, 1, 0, 0, 0, 0];
 
-        loop {
-            let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
 
-            let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
-            private_key.debug_glwe("string", &sorted_lut.0, &ctx);
+        let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+        // private_key.debug_glwe("string", &sorted_lut.0, &ctx);
 
-            let expected_array = vec![0, 0, 0, 0, 1, 1, 2, 3];
-            for i in 0..array.len() {
-                let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
-                let actual = private_key.decrypt_lwe(&lwe, &ctx);
-                println!("{}", actual);
-                assert_eq!(actual, expected_array[i]);
-            }
+        let expected_array = vec![0, 0, 0, 0, 1, 1, 2, 3];
+        for i in 0..array.len() {
+            let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
+            let actual = private_key.decrypt_lwe(&lwe, &ctx);
+            assert_eq!(actual, expected_array[i]);
         }
     }
 }
