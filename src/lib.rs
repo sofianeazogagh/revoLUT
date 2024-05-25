@@ -1210,6 +1210,19 @@ impl PublicKey {
         blind_rotate_assign(&neg_i, &mut other.0, &self.fourier_bsk);
         self.glwe_sum_assign(&mut lut.0, &other.0);
     }
+
+    pub fn blind_array_add_trivial(
+        &self,
+        lut: &mut LUT,
+        i: &LweCiphertext<Vec<u64>>,
+        x: u64,
+        ctx: &Context,
+    ) {
+        let mut other = LUT::from_vec_trivially(&vec![x], ctx);
+        let neg_i = self.neg_lwe(i, ctx);
+        blind_rotate_assign(&neg_i, &mut other.0, &self.fourier_bsk);
+        self.glwe_sum_assign(&mut lut.0, &other.0);
+    }
 }
 
 pub struct LUT(pub GlweCiphertext<Vec<u64>>);

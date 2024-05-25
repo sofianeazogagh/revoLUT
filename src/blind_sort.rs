@@ -98,7 +98,7 @@ impl crate::PublicKey {
         // println!("counting values");
         for i in 0..n {
             let x = self.sample_extract(&lut, i, ctx);
-            self.blind_array_add(&mut count, &x, &one, ctx);
+            self.blind_array_add_trivial(&mut count, &x, 1, ctx);
         }
 
         // step 2: sort
