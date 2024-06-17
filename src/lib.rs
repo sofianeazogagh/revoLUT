@@ -296,9 +296,9 @@ impl PrivateKey {
         );
 
         let sks = ServerKey {
-            bootstapping_key : fourier_bsk,
+            bootstrapping_key : fourier_bsk,
             carry_modulus:ctx.carry_modulus(),
-            key_skwitching_key:lwe_ksk,
+            key_switching_key:lwe_ksk,
             max_degree: tfhe::shortint::server_key::MaxDegree(ctx.full_message_modulus()),
             message_modulus:ctx.message_modulus(),
             ciphertext_modulus:ctx.ciphertext_modulus()
