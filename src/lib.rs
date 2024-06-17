@@ -295,12 +295,22 @@ impl PrivateKey {
 
         );
 
+        let sks = ServerKey {
+            bootstapping_key : fourier_bsk,
+            carry_modulus:ctx.carry_modulus(),
+            key_skwitching_key:lwe_ksk,
+            max_degree: tfhe::shortint::server_key::MaxDegree(ctx.full_message_modulus()),
+            message_modulus:ctx.message_modulus(),
+            ciphertext_modulus:ctx.ciphertext_modulus()
+        };
+
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
             pfpksk,
             cbs_pfpksk,
             pkk,
+            sks,
         };
 
         PrivateKey {
@@ -566,6 +576,7 @@ pub struct PublicKey {
     pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub cbs_pfpksk: LwePrivateFunctionalPackingKeyswitchKeyListOwned<u64>,
     pub pkk:LwePackingKeyswitchKeyOwned<u64>,
+    pub sks:ServerKey,
 }
 
 impl PublicKey {
