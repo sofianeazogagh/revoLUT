@@ -14,7 +14,11 @@ use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude:
 use tfhe::{core_crypto::algorithms::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
-use tfhe::shortint::{prelude::CiphertextModulus,ShortintBootstrappingKey, prelude::*};
+use tfhe::shortint::{prelude::CiphertextModulus, prelude::*};
+use tfhe::core_crypto::commons::parameters::PBSOrder;
+use tfhe::shortint::server_key::ShortintBootstrappingKey;
+use tfhe::shortint::cihertext::MaxDegree;
+use tfhe::shortint::parameters::shortintParameterSet::*;
 
 /// lazily compute a trivially encrypted boolean comparison matrix of the form:
 /// ```text
@@ -334,7 +338,7 @@ impl PrivateKey {
             max_degree: MaxDegree(ctx.full_message_modulus()),
             message_modulus:ctx.message_modulus(),
             ciphertext_modulus:ctx.ciphertext_modulus(),
-            max_noise_level:ctx.message_modulus().0-1,
+            max_noise_level:MaxNoiseLevel(ctx.message_modulus().0-1),
             pbs_order:BootstrapKeyswitch,
         };
 
