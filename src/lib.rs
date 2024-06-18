@@ -14,7 +14,7 @@ use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude:
 use tfhe::{core_crypto::algorithms::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
-use tfhe::shortint::{prelude::CiphertextModulus, prelude::*};
+use tfhe::shortint::{prelude::CiphertextModulus,ShortintBootstrappingKey, prelude::*};
 
 /// lazily compute a trivially encrypted boolean comparison matrix of the form:
 /// ```text
@@ -319,7 +319,7 @@ impl PrivateKey {
         let multi_bit = MultiBit {
             fourier_bsk: fourier_multi_bsk,
             thread_count: 4,
-            deterministic_execution: bool,
+            deterministic_execution: 1,
         };
 
         let sbk = ShortintBootstrappingKey {
@@ -331,11 +331,11 @@ impl PrivateKey {
             bootstrapping_key : sbk,
             carry_modulus:ctx.carry_modulus(),
             key_switching_key:lwe_ksk,
-            max_degree: ctx.full_message_modulus(),
+            max_degree: MaxDegree(ctx.full_message_modulus()),
             message_modulus:ctx.message_modulus(),
             ciphertext_modulus:ctx.ciphertext_modulus(),
-            max_noise_level:ctx.message_modulus()-1,
-            pbs_order:1,
+            max_noise_level:ctx.message_modulus().0-1,
+            pbs_order:BootstrapKeyswitch,
         };
 
         let public_key = PublicKey {
