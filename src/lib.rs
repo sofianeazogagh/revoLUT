@@ -223,6 +223,28 @@ impl PrivateKey {
             std_bootstrapping_key.decomposition_level_count(),
         );
 
+        let std_multibit_bootstrapping_key = par_allocate_and_generate_new_lwe_multi_bit_bootstrap_key(
+            &small_lwe_sk,
+            &glwe_sk,
+            ctx.pbs_base_log(),
+            ctx.pbs_level(),
+            LweBskGroupingFactor(3),
+            ctx.glwe_modular_std_dev(),
+            ctx.ciphertext_modulus(),
+            &mut ctx.encryption_generator,
+        );
+
+        let mut fourier_multi_bsk = FourierLweMultiBitBootstrapKeyOwned::new(
+            std_multibit_bootstrapping_key.input_lwe_dimension(),
+            std_multibit_bootstrapping_key.glwe_size(),
+            std_multibit_bootstrapping_key.polynomial_size(),
+            std_multibit_bootstrapping_key.decomposition_base_log(),
+            std_multibit_bootstrapping_key.decomposition_level_count(),
+            LweBskGroupingFactor(3),
+        );
+
+
+
         // Use the conversion function (a memory optimized version also exists but is more complicated
         // to use) to convert the standard bootstrapping key to the Fourier domain
         convert_standard_lwe_bootstrap_key_to_fourier(&std_bootstrapping_key, &mut fourier_bsk);
@@ -294,14 +316,26 @@ impl PrivateKey {
             &mut ctx.encryption_generator,
 
         );
+        let multi_bit = MultiBit {
+            fourier_bsk: fourier_multi_bsk,
+            thread_count: 4,
+            deterministic_execution: bool,
+        };
+
+        let sbk = ShortintBootstrappingKey {
+            Classic :fourier_bsk,
+            MultiBit: multi_bit,
+        };
 
         let sks = ServerKey {
-            bootstrapping_key : fourier_bsk,
+            bootstrapping_key : sbk,
             carry_modulus:ctx.carry_modulus(),
             key_switching_key:lwe_ksk,
-            max_degree: tfhe::shortint::server_key::MaxDegree(ctx.full_message_modulus()),
+            max_degree: ctx.full_message_modulus(),
             message_modulus:ctx.message_modulus(),
-            ciphertext_modulus:ctx.ciphertext_modulus()
+            ciphertext_modulus:ctx.ciphertext_modulus(),
+            max_noise_level:ctx.message_modulus()-1,
+            pbs_order:1,
         };
 
         let public_key = PublicKey {
