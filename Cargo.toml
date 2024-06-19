@@ -6,9 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
-tfhe = { version = "0.6.1", features = [ "boolean", "shortint", "aarch64-unix" ] }
+tfhe = { version = "0.6.1", features = ["boolean", "shortint", "aarch64-unix"] }
 [target.'cfg(target_arch = "x86_64")'.dependencies]
-tfhe = { version = "0.6.1", features = [ "boolean", "shortint", "x86_64-unix" ] }
+tfhe = { version = "0.6.1", features = ["boolean", "shortint", "x86_64-unix"] }
 
 [dependencies]
 num-complex = "0.4.0"
@@ -43,4 +43,8 @@ harness = false
 
 [[bench]]
 name = "bcs"
+harness = false
+
+[[bench]]
+name = "packing"
 harness = false

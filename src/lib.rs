@@ -1463,35 +1463,28 @@ impl LUT {
     }
 
     pub fn from_lwe(lwe: &LweCiphertext<Vec<u64>>, public_key: &PublicKey, ctx: &Context) -> LUT {
-        let redundant_lwe = Self::add_redundancy(lwe, &ctx);
-        let mut container: Vec<u64> = Vec::new();
-        for ct in redundant_lwe {
-            let mut lwe = ct.into_container();
-            container.append(&mut lwe);
-        }
-        let lwe_ciphertext_list = LweCiphertextList::from_container(
-            container,
-            ctx.small_lwe_dimension().to_lwe_size(),
-            ctx.ciphertext_modulus(),
-        );
-        // Prepare our output GLWE
         let mut glwe = GlweCiphertext::new(
             0,
             ctx.glwe_dimension().to_glwe_size(),
             ctx.polynomial_size(),
             ctx.ciphertext_modulus(),
         );
-        // Keyswitch and pack
-        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
             &public_key.pfpksk,
             &mut glwe,
-            &lwe_ciphertext_list,
+            &lwe,
         );
 
-        let poly_monomial_degree = MonomialDegree(ctx.polynomial_size().0 - ctx.box_size() / 2);
-        public_key.glwe_absorption_monic_monomial(&mut glwe, poly_monomial_degree);
+        let mut output = glwe.clone();
+        for _ in 0..ctx.box_size() {
+            public_key.glwe_absorption_monic_monomial(&mut glwe, MonomialDegree(1));
+            public_key.glwe_sum_assign(&mut output, &glwe);
+        }
 
-        LUT(glwe)
+        let poly_monomial_degree = MonomialDegree(ctx.polynomial_size().0 - ctx.box_size() / 2);
+        public_key.glwe_absorption_monic_monomial(&mut output, poly_monomial_degree);
+
+        LUT(output)
     }
 
     pub fn to_many_lwe(
@@ -2020,7 +2013,7 @@ mod test {
         let param = PARAM_MESSAGE_2_CARRY_0;
         let size = param.message_modulus.0;
         if array.len() == 0 {
-            return TestResult::discard()
+            return TestResult::discard();
         }
         array.truncate(size);
         array.iter_mut().for_each(|v| *v %= size as u64);
