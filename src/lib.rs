@@ -946,10 +946,6 @@ impl PublicKey {
             result_glwe = self.glwe_sum(&result_glwe, &many_lut[i].0);
         }
 
-        // Rotation of -half_box_size to get the accurate result when we sample extract
-        let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
-        self.glwe_absorption_monic_monomial(&mut result_glwe, poly_monomial_degree);
-
         LUT(result_glwe)
     }
 
@@ -1481,57 +1477,23 @@ impl LUT {
         LUT(output)
     }
 
+    /// Extract each element from the LUT into a LWE
     pub fn to_many_lwe(
         &self,
         public_key: &PublicKey,
         ctx: &Context,
     ) -> Vec<LweCiphertext<Vec<u64>>> {
-        let mut many_lwe: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
-        for i in 0..ctx.full_message_modulus() {
-            let mut lwe_sample = LweCiphertext::new(
-                0_64,
-                ctx.big_lwe_dimension().to_lwe_size(),
-                ctx.ciphertext_modulus(),
-            );
-            extract_lwe_sample_from_glwe_ciphertext(
-                &self.0,
-                &mut lwe_sample,
-                MonomialDegree(i * ctx.box_size() as usize),
-            );
-            let mut switched = LweCiphertext::new(
-                0,
-                ctx.small_lwe_dimension().to_lwe_size(),
-                ctx.ciphertext_modulus(),
-            );
-            keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
-            many_lwe.push(switched);
-        }
-        many_lwe
+        (0..ctx.full_message_modulus())
+            .map(|i| public_key.sample_extract(&self, i, ctx))
+            .collect()
     }
 
+    /// Make a LUT starting with each element from this LUT
     pub fn to_many_lut(&self, public_key: &PublicKey, ctx: &Context) -> Vec<LUT> {
-        // Extract each element from the LUT into a LWE
-        let many_lwe = self.to_many_lwe(public_key, ctx);
-
-        // Many-Lwe to Many-Glwe
-        let mut many_glwe: Vec<LUT> = Vec::new();
-        for lwe in many_lwe {
-            let mut glwe = GlweCiphertext::new(
-                0_u64,
-                ctx.glwe_dimension().to_glwe_size(),
-                ctx.polynomial_size(),
-                ctx.ciphertext_modulus(),
-            );
-            let redundancy_lwe = public_key.one_lwe_to_lwe_ciphertext_list(&lwe, ctx);
-            par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-                &public_key.pfpksk,
-                &mut glwe,
-                &redundancy_lwe,
-            );
-
-            many_glwe.push(LUT(glwe));
-        }
-        many_glwe
+        self.to_many_lwe(public_key, ctx)
+            .iter()
+            .map(|lwe| LUT::from_lwe(&lwe, public_key, ctx))
+            .collect()
     }
 
     pub fn add_lut(&self, lut_r: &LUT) -> LUT {
