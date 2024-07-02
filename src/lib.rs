@@ -1287,15 +1287,6 @@ impl LUT {
         redundant_many_lwe
     }
 
-    fn add_redundancy(
-        lwe: &LweCiphertext<Vec<u64>>,
-        ctx: &Context,
-    ) -> Vec<LweCiphertext<Vec<u64>>> {
-        let box_size = ctx.box_size();
-        let redundant_lwe: Vec<LweCiphertext<Vec<u64>>> = vec![(*lwe).clone(); box_size];
-        redundant_lwe
-    }
-
     pub fn from_function<F>(f: F, ctx: &Context) -> LUT
     where
         F: Fn(u64) -> u64,
@@ -1361,8 +1352,10 @@ impl LUT {
         ctx: &Context,
     ) -> LUT {
         let redundant_many_lwe = Self::add_redundancy_many_lwe(many_lwe, &ctx);
+        let private_key = key(ctx.parameters);
         let mut lwe_container: Vec<u64> = Vec::new();
         for ct in redundant_many_lwe {
+            private_key.debug_lwe("ct", &ct, ctx);
             let mut lwe = ct.into_container();
             lwe_container.append(&mut lwe);
         }
@@ -1386,6 +1379,7 @@ impl LUT {
             &mut glwe,
             &lwe_ciphertext_list,
         );
+        private_key.debug_glwe("glwe", &glwe, ctx);
 
         let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
         public_key.glwe_absorption_monic_monomial(&mut glwe, poly_monomial_degree);
@@ -1622,6 +1616,18 @@ impl LUT {
             &mut self.0,
             MonomialDegree(2 * ctx.polynomial_size().0 - rotation),
         );
+    }
+
+    pub fn bootstrap(&self, public_key: &PublicKey, ctx: &Context) -> LUT {
+        // let n = self.0.polynomial_size().0 / ctx.box_size;
+        // let elements = Vec::from_iter((0..n).map(|i| public_key.sample_extract(self, i, ctx)));
+        let many_lwe = self.to_many_lwe(public_key, ctx);
+        // let private_key = key(ctx.parameters);
+        // for (i, ciphertext) in many_lwe.iter().enumerate() {
+        //     let decrypted = private_key.decrypt_lwe(ciphertext, ctx);
+        //     println!("decrypted {}: {}", i, decrypted);
+        // }
+        LUT::from_vec_of_lwe(many_lwe, public_key, ctx)
     }
 }
 
@@ -2021,5 +2027,47 @@ mod test {
         let x = x % size as u64;
         println!("{} {} {:?}", i, x, array);
         TestResult::from_bool(blind_array_add_prop(array, i, x))
+    }
+
+    #[test]
+    fn test_lut_from_vec_of_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let expected = 1;
+        let data = vec![private_key.allocate_and_encrypt_lwe(expected, &mut ctx)];
+        // Vec::from_iter((0..4).map(|i| private_key.allocate_and_encrypt_lwe(i, &mut ctx)));
+
+        let lut = LUT::from_vec_of_lwe(data, public_key, &ctx);
+        private_key.debug_glwe("lut", &lut.0, &ctx);
+        let lwe = public_key.sample_extract(&lut, 0, &ctx);
+        let actual = private_key.decrypt_lwe(&lwe, &ctx);
+        assert_eq!(actual, expected);
+
+        // for i in 0..4 {
+        //     let actual = private_key.decrypt_lwe(&public_key.sample_extract(&lut, i, &ctx), &ctx);
+        //     println!("{}", i);
+        //     assert_eq!(actual, i as u64);
+        // }
+    }
+
+    #[test]
+    fn test_bootstrap() {
+        let ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let lut = LUT::from_vec_trivially(&vec![2, 0, 1, 3], &ctx);
+
+        let other = lut.bootstrap(public_key, &ctx);
+
+        for i in 0..lut.0.polynomial_size().0 {
+            let expected = private_key.decrypt_lwe(&public_key.sample_extract(&lut, i, &ctx), &ctx);
+            let actual = private_key.decrypt_lwe(&public_key.sample_extract(&other, i, &ctx), &ctx);
+
+            println!("idx: {}, actual: {}, expected: {}", i, actual, expected);
+            assert_eq!(actual, expected);
+        }
     }
 }
