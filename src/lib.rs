@@ -1457,7 +1457,7 @@ impl LUT {
     }
 
     pub fn from_lwe(lwe: &LweCiphertext<Vec<u64>>, public_key: &PublicKey, ctx: &Context) -> LUT {
-        let mut glwe = GlweCiphertext::new(
+        let mut output = GlweCiphertext::new(
             0,
             ctx.glwe_dimension().to_glwe_size(),
             ctx.polynomial_size(),
@@ -1465,14 +1465,14 @@ impl LUT {
         );
         par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
             &public_key.pfpksk,
-            &mut glwe,
+            &mut output,
             &lwe,
         );
 
-        let mut output = glwe.clone();
-        for _ in 0..ctx.box_size() {
-            public_key.glwe_absorption_monic_monomial(&mut glwe, MonomialDegree(1));
-            public_key.glwe_sum_assign(&mut output, &glwe);
+        for i in 0..ctx.box_size().ilog2() {
+            let mut other = output.clone();
+            public_key.glwe_absorption_monic_monomial(&mut other, MonomialDegree(2usize.pow(i)));
+            public_key.glwe_sum_assign(&mut output, &other);
         }
 
         let poly_monomial_degree = MonomialDegree(ctx.polynomial_size().0 - ctx.box_size() / 2);
