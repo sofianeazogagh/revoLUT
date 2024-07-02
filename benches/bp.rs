@@ -34,6 +34,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     bench_bp(c, PARAM_MESSAGE_2_CARRY_0);
     bench_bp(c, PARAM_MESSAGE_3_CARRY_0);
     bench_bp(c, PARAM_MESSAGE_4_CARRY_0);
+    bench_bp(c, PARAM_MESSAGE_5_CARRY_0);
 }
 
 criterion_group! {
