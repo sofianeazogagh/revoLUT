@@ -245,7 +245,8 @@ impl PrivateKey {
         // By convention from the paper the polynomial we use here is the constant -1
         let mut last_polynomial = Polynomial::new(0, ctx.polynomial_size());
         // Set the constant term to u64::MAX == -1i64
-        last_polynomial[0] = u64::MAX;
+        // last_polynomial[0] = u64::MAX;
+        last_polynomial[0] = 1_u64;
         // Generate the LWE private functional packing keyswitch key
         par_generate_lwe_private_functional_packing_keyswitch_key(
             &small_lwe_sk,
@@ -1355,7 +1356,7 @@ impl LUT {
         let private_key = key(ctx.parameters);
         let mut lwe_container: Vec<u64> = Vec::new();
         for ct in redundant_many_lwe {
-            private_key.debug_lwe("ct", &ct, ctx);
+            // private_key.debug_lwe("ct", &ct, ctx);
             let mut lwe = ct.into_container();
             lwe_container.append(&mut lwe);
         }
@@ -1825,17 +1826,58 @@ mod test {
 
     #[test]
     fn test_many_lwe_to_glwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = PrivateKey::new(&mut ctx);
         let public_key = &private_key.public_key;
-        let our_input: Vec<u64> = vec![1, 2, 3, 15];
+        let our_input: Vec<u64> = vec![0, 1, 2, 3];
         let mut many_lwe: Vec<LweCiphertext<Vec<u64>>> = vec![];
         for input in our_input {
             let lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
             many_lwe.push(lwe);
         }
+        // for lwe in many_lwe.clone() {
+        //     private_key.debug_lwe("ct", &lwe, &ctx);
+        // }
         let lut = LUT::from_vec_of_lwe(many_lwe, public_key, &ctx);
         let output_pt = private_key.decrypt_and_decode_glwe(&lut.0, &ctx);
+        println!("Test many LWE to one GLWE");
+        println!("{:?}", output_pt);
+    }
+
+    #[test]
+    fn test_pack_many_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = PrivateKey::new(&mut ctx);
+        let public_key = &private_key.public_key;
+        let our_input: Vec<u64> = vec![0, 1, 2, 3];
+        let mut many_lwe: Vec<LweCiphertext<Vec<u64>>> = vec![];
+        for input in our_input {
+            let lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
+            many_lwe.push(lwe);
+        }
+        let mut glwe = GlweCiphertext::new(
+            0,
+            ctx.glwe_dimension().to_glwe_size(),
+            ctx.polynomial_size(),
+            ctx.ciphertext_modulus(),
+        );
+
+        let mut lwe_list = LweCiphertextList::new(
+            0_u64,
+            ctx.small_lwe_dimension().to_lwe_size(),
+            LweCiphertextCount(many_lwe.len()),
+            ctx.ciphertext_modulus(),
+        );
+        for (mut dst, src) in lwe_list.iter_mut().zip(many_lwe.iter()) {
+            dst.as_mut().copy_from_slice(src.as_ref());
+        }
+
+        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+            &public_key.pfpksk,
+            &mut glwe,
+            &lwe_list,
+        );
+        let output_pt = private_key.decrypt_and_decode_glwe(&glwe, &ctx);
         println!("Test many LWE to one GLWE");
         println!("{:?}", output_pt);
     }
@@ -2062,7 +2104,7 @@ mod test {
 
         let other = lut.bootstrap(public_key, &ctx);
 
-        for i in 0..lut.0.polynomial_size().0 {
+        for i in 0..ctx.full_message_modulus() {
             let expected = private_key.decrypt_lwe(&public_key.sample_extract(&lut, i, &ctx), &ctx);
             let actual = private_key.decrypt_lwe(&public_key.sample_extract(&other, i, &ctx), &ctx);
 
