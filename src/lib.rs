@@ -9,6 +9,7 @@ use num_complex::Complex;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
+// use std::process::Output;
 use std::sync::OnceLock;
 use tfhe::shortint::{CarryModulus, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
@@ -684,6 +685,27 @@ impl PublicKey {
             polynomial_wrapping_monic_monomial_mul_assign(&mut glwe_poly, monomial_degree);
         }
     }
+
+    pub fn glwe_absorption_polynomial(
+        &self,
+        glwe: &mut GlweCiphertext<Vec<u64>>,
+        poly: Polynomial<Vec<u64>>,
+    ) -> GlweCiphertext<Vec<u64>> {
+        let mut res = GlweCiphertext::new(
+            0_u64,
+            glwe.glwe_size(),
+            glwe.polynomial_size(),
+            glwe.ciphertext_modulus(),
+        );
+
+        res.as_mut_polynomial_list()
+            .iter_mut()
+            .zip(glwe.as_polynomial_list().iter())
+            .for_each(|(mut dst, lhs)| polynomial_karatsuba_wrapping_mul(&mut dst, &lhs, &poly));
+
+        return res;
+    }
+
     pub fn glwe_sum(
         &self,
         ct1: &GlweCiphertext<Vec<u64>>,
@@ -2073,5 +2095,19 @@ mod test {
             println!("idx: {}, actual: {}, expected: {}", i, actual, expected);
             assert_eq!(actual, expected);
         }
+    }
+
+    #[test]
+    fn test_absorption_glwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+        let array = vec![0, 1, 2, 3];
+        let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        private_key.debug_glwe("glwe = ", &lut.0, &ctx);
+        let mut poly = Polynomial::new(0_u64, ctx.polynomial_size());
+        poly[0] = 1_u64;
+        let res = public_key.glwe_absorption_polynomial(&mut lut.0, poly);
+        private_key.debug_glwe("res = ", &res, &ctx);
     }
 }
