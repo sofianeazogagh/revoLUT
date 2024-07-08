@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use tfhe::shortint::{CarryModulus, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
-use tfhe::shortint::parameters::ClassicPBSParameters;
+use tfhe::shortint::parameters::{ClassicPBSParameters, PARAM_MESSAGE_2_CARRY_0};
 use tfhe::shortint::prelude::CiphertextModulus;
 
 use rand::Rng;
@@ -392,6 +392,21 @@ impl PrivateKey {
         output_glwe
     }
 
+    pub fn allocate_and_trivially_encrypt_glwe(
+        &self,
+        pt_list: PlaintextList<Vec<u64>>,
+        ctx: &mut Context,
+    ) -> GlweCiphertext<Vec<u64>> {
+        let mut output_glwe = GlweCiphertext::new(
+            0,
+            ctx.glwe_dimension().to_glwe_size(),
+            ctx.polynomial_size(),
+            ctx.ciphertext_modulus(),
+        );
+        trivially_encrypt_glwe_ciphertext(&mut output_glwe, &pt_list);
+        output_glwe
+    }
+
     pub fn encrypt_glwe(
         &self,
         output_glwe: &mut GlweCiphertext<Vec<u64>>,
@@ -573,6 +588,21 @@ impl PublicKey {
         lwe_ciphertext
     }
 
+    pub fn allocate_and_trivially_encrypt_glwe(
+        &self,
+        pt_list: PlaintextList<Vec<u64>>,
+        ctx: &Context,
+    ) -> GlweCiphertext<Vec<u64>> {
+        let mut output_glwe = GlweCiphertext::new(
+            0,
+            ctx.glwe_dimension().to_glwe_size(),
+            ctx.polynomial_size(),
+            ctx.ciphertext_modulus(),
+        );
+        trivially_encrypt_glwe_ciphertext(&mut output_glwe, &pt_list);
+        output_glwe
+    }
+
     pub fn leq_scalar(
         &self,
         ct_input: &LweCiphertext<Vec<u64>>,
@@ -682,6 +712,26 @@ impl PublicKey {
             // let glwe_poly_read_only = Polynomial::from_container(glwe_poly.as_ref().to_vec());
             polynomial_wrapping_monic_monomial_mul_assign(&mut glwe_poly, monomial_degree);
         }
+    }
+
+    pub fn glwe_absorption_polynomial(
+        &self,
+        glwe: &mut GlweCiphertext<Vec<u64>>,
+        poly: &Polynomial<Vec<u64>>,
+    ) -> GlweCiphertext<Vec<u64>> {
+        let mut res = GlweCiphertext::new(
+            0_u64,
+            glwe.glwe_size(),
+            glwe.polynomial_size(),
+            glwe.ciphertext_modulus(),
+        );
+
+        res.as_mut_polynomial_list()
+            .iter_mut()
+            .zip(glwe.as_polynomial_list().iter())
+            .for_each(|(mut dst, lhs)| polynomial_karatsuba_wrapping_mul(&mut dst, &lhs, poly));
+
+        return res;
     }
     pub fn glwe_sum(
         &self,
@@ -838,6 +888,71 @@ impl PublicKey {
         );
         keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut output);
         return output;
+    }
+
+    pub fn blind_matrix_access_multi_values_opt(
+        &self,
+        matrix: &Vec<Vec<u64>>,
+        lwe_line: LweCiphertext<Vec<u64>>,
+        lwe_column: LweCiphertext<Vec<u64>>,
+        ctx: &mut Context,
+    ) -> LweCiphertext<Vec<u64>> {
+        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
+        // Créer un polynôme représentant (1 - x) pour le côté gauche
+        let mut lhs = Polynomial::new(0, ctx.polynomial_size());
+        lhs[0] = 1u64;
+        lhs[1] = u64::MAX;
+
+        // Créer un polynôme représentant (1 + ... + x^N) pour le côté droit
+        let vec_rhs = vec![1_u64 * ctx.delta(); ctx.polynomial_size().0];
+        let pt_rhs = PlaintextList::from_container(vec_rhs);
+
+        // Encoder le plaintext et l'encrypter trivialement
+        let glwe_rhs = self.allocate_and_trivially_encrypt_glwe(pt_rhs, ctx);
+
+        // Encoder les lignes de la matrice comme des polynômes
+        let mut matrix_in_poly_form: Vec<Polynomial<Vec<u64>>> = Vec::new();
+        for l in matrix.iter() {
+            let vec_l_with_redundancy: Vec<u64> = LUT::add_redundancy_many_u64(l, ctx);
+            println!("line = {:?}", vec_l_with_redundancy);
+            matrix_in_poly_form.push(Polynomial::from_container(vec_l_with_redundancy));
+        }
+
+        // Multiplier chaque ligne de la matrice par le polynôme lhs
+        let mut new_matrix: Vec<Polynomial<Vec<u64>>> = Vec::new();
+        for p in matrix_in_poly_form.iter() {
+            let mut res_mul = Polynomial::new(0_u64, ctx.polynomial_size());
+            polynomial_karatsuba_wrapping_mul(&mut res_mul, &lhs, &p);
+            new_matrix.push(res_mul);
+        }
+
+        // Préparer la LUT pour la rotation aveugle
+        let mut only_lut_to_rotate = LUT(glwe_rhs);
+        blind_rotate_assign(&lwe_column, &mut only_lut_to_rotate.0, &self.fourier_bsk);
+
+        // Appliquer l'absorption GLWE pour chaque ligne de la nouvelle matrice
+        let mut vec_lut: Vec<LUT> = Vec::new();
+        for line in new_matrix.iter() {
+            let lut = self.glwe_absorption_polynomial(&mut only_lut_to_rotate.0, line);
+            vec_lut.push(LUT(lut));
+        }
+
+        // Extraire les échantillons de chaque ligne de la LUT
+        let mut columns_lwe: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
+        for l in vec_lut.iter() {
+            let ct = self.at(&l, 0, ctx);
+            columns_lwe.push(ct);
+        }
+
+        // Packer les LUTs
+        let lut_col = LUT::from_vec_of_lwe(columns_lwe, self, ctx);
+
+        private_key.debug_glwe("column = ", &lut_col.0, ctx);
+
+        // Effectuer une rotation aveugle sur la LUT colonne
+        let result = self.blind_array_access(&lwe_line, &lut_col, ctx);
+
+        return result;
     }
 
     /// Get an element of a `matrix` given it `index_line` and it `index_column`
@@ -1171,7 +1286,7 @@ impl PublicKey {
     }
 
     /// returns the ciphertext at index i from the given lut, accounting for redundancy
-    fn at(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
+    pub fn at(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
         let mut lwe = LweCiphertext::new(
             0u64,
             ctx.big_lwe_dimension.to_lwe_size(),
@@ -1215,7 +1330,7 @@ impl LUT {
         LUT(self.0.clone())
     }
 
-    fn add_redundancy_many_u64(vec: &Vec<u64>, ctx: &Context) -> Vec<u64> {
+    fn add_redundancy_and_encode_many_u64(vec: &Vec<u64>, ctx: &Context) -> Vec<u64> {
         // N/(p/2) = size of each block, to correct noise from the input we introduce the notion of
         // box, which manages redundancy to yield a denoised value for several noisy values around
         // a true input value.
@@ -1269,6 +1384,34 @@ impl LUT {
         redundant_lwe
     }
 
+    fn add_redundancy_many_u64(vec: &Vec<u64>, ctx: &Context) -> Vec<u64> {
+        // N/(p/2) = size of each block, to correct noise from the input we introduce the notion of
+        // box, which manages redundancy to yield a denoised value for several noisy values around
+        // a true input value.
+        let box_size = ctx.box_size();
+
+        // Create the output
+        let mut accumulator_u64 = vec![0_u64; ctx.polynomial_size().0];
+
+        // Fill each box with the encoded denoised value
+        for i in 0..vec.len() {
+            let index = i * box_size;
+            for j in index..index + box_size {
+                accumulator_u64[j] = vec[i];
+            }
+        }
+
+        let half_box_size = box_size / 2;
+        // Negate the first half_box_size coefficients to manage negacyclicity and rotate
+        for a_i in accumulator_u64[0..half_box_size].iter_mut() {
+            *a_i = ((*a_i).wrapping_neg()) % ctx.full_message_modulus() as u64;
+        }
+        // Rotate the accumulator
+        accumulator_u64.rotate_left(half_box_size);
+
+        accumulator_u64
+    }
+
     pub fn from_function<F>(f: F, ctx: &Context) -> LUT
     where
         F: Fn(u64) -> u64,
@@ -1313,14 +1456,14 @@ impl LUT {
             ctx.polynomial_size(),
             ctx.ciphertext_modulus(),
         );
-        let redundant_lut = Self::add_redundancy_many_u64(vec, ctx);
+        let redundant_lut = Self::add_redundancy_and_encode_many_u64(vec, ctx);
         let accumulator_plaintext = PlaintextList::from_container(redundant_lut);
         private_key.encrypt_glwe(&mut lut_as_glwe, accumulator_plaintext, ctx);
         LUT(lut_as_glwe)
     }
 
     fn from_vec_trivially(data: &Vec<u64>, ctx: &Context) -> LUT {
-        let redundant_lut = Self::add_redundancy_many_u64(data, ctx);
+        let redundant_lut = Self::add_redundancy_and_encode_many_u64(data, ctx);
         LUT(allocate_and_trivially_encrypt_new_glwe_ciphertext(
             ctx.glwe_dimension().to_glwe_size(),
             &PlaintextList::from_container(redundant_lut),
@@ -1746,6 +1889,7 @@ mod test {
 
     use itertools::Itertools;
     use quickcheck::TestResult;
+    use rayon::result;
     use tfhe::shortint::parameters::*;
 
     use super::*;
@@ -1958,5 +2102,56 @@ mod test {
                 assert_eq!(actual, i);
             }
         }
+    }
+
+    #[test]
+
+    fn test_absorption_glwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+        let array = vec![0, 1, 2, 3];
+        let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        private_key.debug_glwe("glwe = ", &lut.0, &ctx);
+        let mut poly = Polynomial::new(0_u64, ctx.polynomial_size());
+        poly[0] = 1_u64;
+        let res = public_key.glwe_absorption_polynomial(&mut lut.0, &poly);
+        private_key.debug_glwe("res = ", &res, &ctx);
+    }
+
+    #[test]
+    fn test_bma_mv() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = PrivateKey::new(&mut ctx);
+        let public_key = &private_key.public_key;
+
+        let p = ctx.full_message_modulus() as u64;
+
+        // Matrice de test pour la vérification
+        let matrix: Vec<Vec<u64>> = vec![
+            vec![0, 1, 2, 3],
+            vec![1, 2, 3, 0],
+            vec![2, 3, 0, 1],
+            vec![3, 0, 1, 2],
+        ];
+
+        // Ligne et colonne à utiliser pour la vérification
+        let line = 1;
+        let column = 0;
+
+        // Chiffrer les indices de la colonne et de la ligne
+        let lwe_column = private_key.allocate_and_encrypt_lwe(column, &mut ctx);
+        let lwe_line = private_key.allocate_and_encrypt_lwe(line, &mut ctx);
+
+        // Appeler la fonction process_matrix_with_lwe
+        let result = public_key
+            .blind_matrix_access_multi_values_opt(&matrix, lwe_line, lwe_column, &mut ctx);
+
+        let result_decrypted = private_key.decrypt_lwe(&result, &ctx);
+        println!(
+            "expected : {}, got : {}, ",
+            2 * (matrix[line as usize][column as usize]) % p,
+            result_decrypted
+        );
     }
 }
