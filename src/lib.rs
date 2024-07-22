@@ -10,6 +10,7 @@ use rayon::{prelude::*, vec};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::OnceLock;
+use std::time::Instant;
 use tfhe::shortint::{CarryModulus, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
@@ -908,6 +909,8 @@ impl PublicKey {
         // Encoder le plaintext et l'encrypter trivialement
         let glwe_rhs = self.allocate_and_trivially_encrypt_glwe(pt_rhs, ctx);
 
+        //#cashing the matrix
+
         // Encoder les lignes de la matrice comme des polynômes
         let mut matrix_in_poly_form: Vec<Polynomial<Vec<u64>>> = Vec::new();
         for l in matrix.iter() {
@@ -925,6 +928,7 @@ impl PublicKey {
 
         // Préparer la LUT pour la rotation aveugle
         let mut only_lut_to_rotate = LUT(glwe_rhs);
+        let start_bma_mv = Instant::now();
         blind_rotate_assign(&lwe_column, &mut only_lut_to_rotate.0, &self.fourier_bsk);
 
         // Appliquer l'absorption GLWE pour chaque ligne de la nouvelle matrice
@@ -940,6 +944,8 @@ impl PublicKey {
 
         // Effectuer une rotation aveugle sur la LUT colonne
         let result = self.blind_array_access(&lwe_line, &lut_col, ctx);
+        let elapsed = Instant::now() - start_bma_mv;
+        print!("bma_mv ({:?}): ", elapsed);
 
         return result;
     }
@@ -1319,6 +1325,7 @@ impl LUT {
         LUT(self.0.clone())
     }
 
+    /* Fill the boxes and multiplying the content by delta (encoding in the MSB) */
     fn add_redundancy_and_encode_many_u64(vec: &Vec<u64>, ctx: &Context) -> Vec<u64> {
         // N/(p/2) = size of each block, to correct noise from the input we introduce the notion of
         // box, which manages redundancy to yield a denoised value for several noisy values around
@@ -1373,6 +1380,7 @@ impl LUT {
         redundant_lwe
     }
 
+    /* Fill the boxes without multiplying the content by delta */
     fn add_redundancy_many_u64(vec: &Vec<u64>, ctx: &Context) -> Vec<u64> {
         // N/(p/2) = size of each block, to correct noise from the input we introduce the notion of
         // box, which manages redundancy to yield a denoised value for several noisy values around
@@ -2177,11 +2185,8 @@ mod test {
         let lwe_line = private_key.allocate_and_encrypt_lwe(line, &mut ctx);
 
         // Appeler la fonction bma_mv
-        let start_bma_mv = Instant::now();
         let result = public_key
             .blind_matrix_access_multi_values_opt(&matrix, lwe_line, lwe_column, &mut ctx);
-        let elapsed = Instant::now() - start_bma_mv;
-        print!("bma_mv ({:?}): ", elapsed);
 
         let result_decrypted = private_key.decrypt_lwe(&result, &ctx);
         println!(
