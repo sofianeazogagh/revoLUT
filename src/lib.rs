@@ -318,29 +318,9 @@ impl PrivateKey {
             ctx.pfks_modular_std_dev(),
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
-
         );
-        let multi_bit = MultiBit {
-            fourier_bsk: fourier_multi_bsk,
-            thread_count: 4,
-            deterministic_execution: 1,
-        };
 
-        let sbk = ShortintBootstrappingKey {
-            Classic :fourier_bsk,
-            MultiBit: multi_bit,
-        };
 
-        let sks = ServerKey {
-            bootstrapping_key : sbk,
-            carry_modulus:ctx.carry_modulus(),
-            key_switching_key:lwe_ksk,
-            max_degree: MaxDegree(ctx.full_message_modulus()),
-            message_modulus:ctx.message_modulus(),
-            ciphertext_modulus:ctx.ciphertext_modulus(),
-            max_noise_level:MaxNoiseLevel(ctx.message_modulus().0-1),
-            pbs_order:BootstrapKeyswitch,
-        };
 
         let public_key = PublicKey {
             lwe_ksk,
@@ -348,7 +328,7 @@ impl PrivateKey {
             pfpksk,
             cbs_pfpksk,
             pkk,
-            sks,
+
         };
 
         PrivateKey {
@@ -614,7 +594,6 @@ pub struct PublicKey {
     pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub cbs_pfpksk: LwePrivateFunctionalPackingKeyswitchKeyListOwned<u64>,
     pub pkk:LwePackingKeyswitchKeyOwned<u64>,
-    pub sks:ServerKey,
 }
 
 impl PublicKey {
