@@ -41,24 +41,44 @@ use std::fs;
 
 use revolut::{Context, PrivateKey};
 use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_3_CARRY_0, PARAM_MESSAGE_4_CARRY_0, PARAM_MESSAGE_5_CARRY_0};
+use tfhe::shortint::ClientKey;
+use tfhe::shortint::ServerKey;
+
+
 
 // mod uni_test;
 // use uni_test::*;
 
 pub fn main() {
-    println!("generating keys and saving them to disk");
-    let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-    let private_key = PrivateKey::new(&mut ctx); // this takes time
-    let _ = fs::write("PrivateKey2", &bincode::serialize(&private_key).unwrap());
-    let mut ctx = Context::from(PARAM_MESSAGE_3_CARRY_0);
-    let private_key = PrivateKey::new(&mut ctx); // this takes time
-    let _ = fs::write("PrivateKey3", &bincode::serialize(&private_key).unwrap());
-    let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-    let private_key = PrivateKey::new(&mut ctx); // this takes time
-    let _ = fs::write("PrivateKey4", &bincode::serialize(&private_key).unwrap());
-    let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
-    let private_key = PrivateKey::new(&mut ctx); // this takes time
-    let _ = fs::write("PrivateKey5", &bincode::serialize(&private_key).unwrap());
+
+    let param = PARAM_MESSAGE_3_CARRY_0;
+    let mut ctx = Context::from(param);
+
+    let cks = ClientKey::new(param);
+    let sks = ServerKey::new(&cks);
+    let private_key = PrivateKey::from_ClientKey(&mut ctx,cks,&sks);
+
+    // let big = cks.large_lwe_secret_key();
+    // let small = cks.small_lwe_secret_key();
+
+
+
+    let private_key = PrivateKey::new(&mut ctx);
+    let public_key = private_key.get_public_key();
+
+    // println!("generating keys and saving them to disk");
+    // let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+    // let private_key = PrivateKey::new(&mut ctx); // this takes time
+    // let _ = fs::write("PrivateKey2", &bincode::serialize(&private_key).unwrap());
+    // let mut ctx = Context::from(PARAM_MESSAGE_3_CARRY_0);
+    // let private_key = PrivateKey::new(&mut ctx); // this takes time
+    // let _ = fs::write("PrivateKey3", &bincode::serialize(&private_key).unwrap());
+    // let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+    // let private_key = PrivateKey::new(&mut ctx); // this takes time
+    // let _ = fs::write("PrivateKey4", &bincode::serialize(&private_key).unwrap());
+    // let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
+    // let private_key = PrivateKey::new(&mut ctx); // this takes time
+    // let _ = fs::write("PrivateKey5", &bincode::serialize(&private_key).unwrap());
 
     // test_blind_tensor_access();
 

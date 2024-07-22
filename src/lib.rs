@@ -15,6 +15,9 @@ use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude:
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
 use tfhe::shortint::prelude::CiphertextModulus;
+use tfhe::shortint::ClientKey;
+use tfhe::shortint::ServerKey;
+use tfhe::shortint::server_key::ShortintBootstrappingKey;
 
 use rand::Rng;
 
@@ -267,6 +270,89 @@ impl PrivateKey {
             &mut ctx.encryption_generator,
         );
 
+        let public_key = PublicKey {
+            lwe_ksk,
+            fourier_bsk,
+            pfpksk,
+            cbs_pfpksk,
+        };
+
+        PrivateKey {
+            small_lwe_sk,
+            big_lwe_sk,
+            glwe_sk,
+            public_key,
+        }
+    }
+
+    pub fn from_ClientKey(ctx: &mut Context,cks:ClientKey,sks:&ServerKey) -> PrivateKey {
+
+        let (glwe_sk, small_lwe_sk,_parameters) = cks.into_raw_parts();
+        let big_lwe_sk = glwe_sk.clone().into_lwe_secret_key();
+        let(lwe_ksk, bsk) = (sks.key_switching_key.clone(), sks.bootstrapping_key.clone());
+
+        let fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>;
+
+        if let ShortintBootstrappingKey::Classic(test) = bsk {
+            fourier_bsk = test;
+        }
+        else {
+            let std_bootstrapping_key = par_allocate_and_generate_new_lwe_bootstrap_key(
+                &small_lwe_sk,
+                &glwe_sk,
+                ctx.pbs_base_log(),
+                ctx.pbs_level(),
+                ctx.glwe_modular_std_dev(),
+                ctx.ciphertext_modulus(),
+                &mut ctx.encryption_generator,
+            );
+
+            // Create the empty bootstrapping key in the Fourier domain
+            fourier_bsk = FourierLweBootstrapKey::new(
+                std_bootstrapping_key.input_lwe_dimension(),
+                std_bootstrapping_key.glwe_size(),
+                std_bootstrapping_key.polynomial_size(),
+                std_bootstrapping_key.decomposition_base_log(),
+                std_bootstrapping_key.decomposition_level_count(),
+            );
+        }
+
+        let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
+            0,
+            ctx.pfks_base_log(),
+            ctx.pfks_level(),
+            ctx.small_lwe_dimension(),
+            ctx.glwe_dimension().to_glwe_size(),
+            ctx.polynomial_size(),
+            ctx.ciphertext_modulus(),
+        );
+
+        // Here there is some freedom for the choice of the last polynomial from algorithm 2
+        // By convention from the paper the polynomial we use here is the constant -1
+        let mut last_polynomial = Polynomial::new(0, ctx.polynomial_size());
+        // Set the constant term to u64::MAX == -1i64
+        last_polynomial[0] = u64::MAX;
+        // Generate the LWE private functional packing keyswitch key
+        par_generate_lwe_private_functional_packing_keyswitch_key(
+            &small_lwe_sk,
+            &glwe_sk,
+            &mut pfpksk,
+            ctx.pfks_modular_std_dev(),
+            &mut ctx.encryption_generator,
+            |x| x,
+            &last_polynomial,
+        );
+
+
+        let cbs_pfpksk = par_allocate_and_generate_new_circuit_bootstrap_lwe_pfpksk_list(
+            &big_lwe_sk,
+            &glwe_sk,
+            ctx.pfks_base_log(),
+            ctx.pfks_level(),
+            ctx.pfks_modular_std_dev(),
+            ctx.ciphertext_modulus(),
+            &mut ctx.encryption_generator,
+        );
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
