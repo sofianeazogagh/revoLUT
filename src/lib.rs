@@ -15,10 +15,7 @@ use tfhe::{core_crypto::algorithms::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use tfhe::shortint::parameters::ClassicPBSParameters;
 use tfhe::shortint::{prelude::CiphertextModulus, prelude::*};
-use tfhe::core_crypto::commons::parameters::PBSOrder;
-use tfhe::shortint::server_key::ShortintBootstrappingKey;
-use tfhe::shortint::cihertext::MaxDegree;
-use tfhe::shortint::parameters::shortintParameterSet::*;
+
 
 /// lazily compute a trivially encrypted boolean comparison matrix of the form:
 /// ```text
