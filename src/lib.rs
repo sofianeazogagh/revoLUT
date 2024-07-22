@@ -18,7 +18,7 @@ use tfhe::shortint::{prelude::CiphertextModulus, prelude::*};
 
 
 /// lazily compute a trivially encrypted boolean comparison matrix of the form:
-/// ```text
+/// ```textmulti
 /// 0 0 0
 /// 1 0 0
 /// 1 1 0
@@ -223,29 +223,7 @@ impl PrivateKey {
             std_bootstrapping_key.decomposition_base_log(),
             std_bootstrapping_key.decomposition_level_count(),
         );
-
-        let std_multibit_bootstrapping_key = par_allocate_and_generate_new_lwe_multi_bit_bootstrap_key(
-            &small_lwe_sk,
-            &glwe_sk,
-            ctx.pbs_base_log(),
-            ctx.pbs_level(),
-            LweBskGroupingFactor(3),
-            ctx.glwe_modular_std_dev(),
-            ctx.ciphertext_modulus(),
-            &mut ctx.encryption_generator,
-        );
-
-        let mut fourier_multi_bsk = FourierLweMultiBitBootstrapKeyOwned::new(
-            std_multibit_bootstrapping_key.input_lwe_dimension(),
-            std_multibit_bootstrapping_key.glwe_size(),
-            std_multibit_bootstrapping_key.polynomial_size(),
-            std_multibit_bootstrapping_key.decomposition_base_log(),
-            std_multibit_bootstrapping_key.decomposition_level_count(),
-            LweBskGroupingFactor(3),
-        );
-
-
-
+        
         // Use the conversion function (a memory optimized version also exists but is more complicated
         // to use) to convert the standard bootstrapping key to the Fourier domain
         convert_standard_lwe_bootstrap_key_to_fourier(&std_bootstrapping_key, &mut fourier_bsk);
