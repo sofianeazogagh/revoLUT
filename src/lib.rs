@@ -6,7 +6,7 @@ extern crate quickcheck_macros;
 
 use aligned_vec::ABox;
 use num_complex::Complex;
-use rayon::{prelude::*, vec};
+use rayon::iter::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
 // use std::process::Output;
@@ -15,9 +15,8 @@ use std::time::Instant;
 use tfhe::shortint::{CarryModulus, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
-use tfhe::shortint::parameters::{
-    ClassicPBSParameters, PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0,
-};
+use rayon::*;
+use tfhe::shortint::parameters::ClassicPBSParameters;
 use tfhe::shortint::prelude::CiphertextModulus;
 
 use rand::Rng;
@@ -739,7 +738,7 @@ impl PublicKey {
         return res;
     }
 
-  pub fn glwe_sum(
+    pub fn glwe_sum(
         &self,
         ct1: &GlweCiphertext<Vec<u64>>,
         ct2: &GlweCiphertext<Vec<u64>>,
@@ -849,14 +848,14 @@ impl PublicKey {
         // multi blind array access
         let vec_of_lwe: Vec<LweCiphertext<Vec<u64>>> = matrix
             .into_par_iter()
-            .map(|lut| self.blind_array_access(index_column, lut, ctx))
+            .map(|lut| self.blind_array_access(column, lut, ctx))
             .collect();
 
         // pack all the lwe
         let accumulator_final = LUT::from_vec_of_lwe(vec_of_lwe, self, &ctx);
 
         // final blind array access
-        self.blind_array_access(&index_line, &accumulator_final, ctx)
+        self.blind_array_access(&line, &accumulator_final, ctx)
     }
 
     pub fn blind_matrix_access_multi_values_opt(
@@ -908,7 +907,7 @@ impl PublicKey {
         let mut columns_lwe: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
         for line in new_matrix.iter() {
             let lut = LUT(self.glwe_absorption_polynomial(&mut only_lut_to_rotate.0, line));
-            let ct = self.at(&lut, 0, ctx);
+            let ct = self.sample_extract(&lut, 0, ctx);
             columns_lwe.push(ct);
         }
 
@@ -1367,6 +1366,35 @@ impl LUT {
         redundant_many_lwe
     }
 
+    /* Fill the boxes without multiplying the content by delta */
+    fn add_redundancy_many_u64(vec: &Vec<u64>, ctx: &Context) -> Vec<u64> {
+        // N/(p/2) = size of each block, to correct noise from the input we introduce the notion of
+        // box, which manages redundancy to yield a denoised value for several noisy values around
+        // a true input value.
+        let box_size = ctx.box_size();
+
+        // Create the output
+        let mut accumulator_u64 = vec![0_u64; ctx.polynomial_size().0];
+
+        // Fill each box with the encoded denoised value
+        for i in 0..vec.len() {
+            let index = i * box_size;
+            for j in index..index + box_size {
+                accumulator_u64[j] = vec[i];
+            }
+        }
+
+        let half_box_size = box_size / 2;
+        // Negate the first half_box_size coefficients to manage negacyclicity and rotate
+        for a_i in accumulator_u64[0..half_box_size].iter_mut() {
+            *a_i = ((*a_i).wrapping_neg()) % ctx.full_message_modulus() as u64;
+        }
+        // Rotate the accumulator
+        accumulator_u64.rotate_left(half_box_size);
+
+        accumulator_u64
+    }
+
     pub fn from_function<F>(f: F, ctx: &Context) -> LUT
     where
         F: Fn(u64) -> u64,
@@ -1819,7 +1847,6 @@ mod test {
 
     use itertools::Itertools;
     use quickcheck::TestResult;
-    use rayon::result;
     use tfhe::shortint::parameters::*;
 
     use super::*;
