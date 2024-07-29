@@ -37,7 +37,7 @@
 
 // mod headers;
 
-use std::{fs, time::Instant};
+use std::fs;
 
 use revolut::*;
 use tfhe::shortint::parameters::*;
@@ -62,18 +62,19 @@ pub fn generate_keys() {
 }
 
 pub fn main() {
-    let param = PARAM_MESSAGE_4_CARRY_0;
-    let mut ctx = Context::from(param);
-    let private_key = key(param);
-    let public_key = &private_key.public_key;
-    let array = vec![3, 2, 1, 2];
-    let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+    generate_keys();
+    // let param = PARAM_MESSAGE_4_CARRY_0;
+    // let mut ctx = Context::from(param);
+    // let private_key = key(param);
+    // let public_key = &private_key.public_key;
+    // let array = vec![3, 2, 1, 2];
+    // let lut = LUT::from_vec(&array, &private_key, &mut ctx);
 
-    let now = Instant::now();
-    let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
-    println!("{:?}", Instant::now() - now);
+    // let now = Instant::now();
+    // let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+    // println!("{:?}", Instant::now() - now);
 
-    sorted_lut.print(&private_key, &ctx);
+    // sorted_lut.print(&private_key, &ctx);
 
     // test_blind_tensor_access();
 

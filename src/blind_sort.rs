@@ -144,11 +144,11 @@ mod tests {
             let c_a = private_key.allocate_and_encrypt_lwe(a as u64, &mut ctx);
             for b in 0..ctx.message_modulus().0 {
                 let c_b = private_key.allocate_and_encrypt_lwe(b as u64, &mut ctx);
-                let begin = Instant::now();
+                // let begin = Instant::now();
                 let c_res = public_key.blind_lt(&c_a, &c_b, &ctx);
-                let elapsed = Instant::now() - begin;
-                println!("elapsed: {:?}", elapsed);
+                // let elapsed = Instant::now() - begin;
                 let res = private_key.decrypt_lwe(&c_res, &ctx);
+                // println!("{} < {} is {} ({}) ({:?})", a, b, res, res == 1, elapsed);
 
                 assert!(res == if a < b { 1 } else { 0 });
             }
@@ -160,15 +160,14 @@ mod tests {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = key(PARAM_MESSAGE_2_CARRY_0);
         let public_key = &private_key.public_key;
-        let array = vec![1, 3, 2, 2];
+        let array = vec![1, 2, 1, 0];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
-        lut.print(&private_key, &ctx);
 
         let sorted_lut = public_key.blind_sort_bma(lut, &ctx);
         println!("sorted");
         sorted_lut.print(&private_key, &ctx);
 
-        let expected_array = vec![1, 2, 2, 3];
+        let expected_array = vec![0, 1, 1, 2];
         for i in 0..ctx.full_message_modulus {
             let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
             let actual = private_key.decrypt_lwe(&lwe, &ctx);
@@ -228,7 +227,6 @@ mod tests {
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
 
         let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
-        // private_key.debug_glwe("string", &sorted_lut.0, &ctx);
 
         let expected_array = vec![0, 0, 0, 0, 1, 1, 2, 3];
         for i in 0..array.len() {

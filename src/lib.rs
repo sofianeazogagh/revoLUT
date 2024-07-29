@@ -813,54 +813,17 @@ impl PublicKey {
         index_column: &LweCiphertext<Vec<u64>>,
         ctx: &Context,
     ) -> LweCiphertext<Vec<u64>> {
-        let mut output = LweCiphertext::new(
-            0u64,
-            ctx.small_lwe_dimension().to_lwe_size(),
-            ctx.ciphertext_modulus(),
-        );
-
         // multi blind array access
-        let mut pbs_results: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
-        pbs_results.par_extend(matrix.into_par_iter().map(|acc| {
-            let mut pbs_ct = LweCiphertext::new(
-                0u64,
-                ctx.big_lwe_dimension().to_lwe_size(),
-                ctx.ciphertext_modulus(),
-            );
-            programmable_bootstrap_lwe_ciphertext(
-                &index_column,
-                &mut pbs_ct,
-                &acc.0,
-                &self.fourier_bsk,
-            );
-            let mut switched = LweCiphertext::new(
-                0,
-                ctx.small_lwe_dimension().to_lwe_size(),
-                ctx.ciphertext_modulus(),
-            );
-            keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
-            switched
-        }));
-
-        let index_line_encoded =
-            self.lwe_ciphertext_plaintext_add(&index_line, ctx.full_message_modulus() as u64, &ctx);
+        let vec_of_lwe: Vec<LweCiphertext<Vec<u64>>> = matrix
+            .into_par_iter()
+            .map(|lut| self.blind_array_access(index_column, lut, ctx))
+            .collect();
 
         // pack all the lwe
-        let accumulator_final = LUT::from_vec_of_lwe(pbs_results, self, &ctx);
+        let accumulator_final = LUT::from_vec_of_lwe(vec_of_lwe, self, &ctx);
+
         // final blind array access
-        let mut ct_res = LweCiphertext::new(
-            0u64,
-            ctx.big_lwe_dimension().to_lwe_size(),
-            ctx.ciphertext_modulus(),
-        );
-        programmable_bootstrap_lwe_ciphertext(
-            &index_line_encoded,
-            &mut ct_res,
-            &accumulator_final.0,
-            &self.fourier_bsk,
-        );
-        keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut output);
-        return output;
+        self.blind_array_access(&index_line, &accumulator_final, ctx)
     }
 
     /// Get an element of a `matrix` given it `index_line` and it `index_column`
@@ -1371,7 +1334,6 @@ impl LUT {
         ctx: &Context,
     ) -> LUT {
         let redundant_many_lwe = Self::add_redundancy_many_lwe(many_lwe, &ctx);
-        let private_key = key(ctx.parameters);
         let mut lwe_container: Vec<u64> = Vec::new();
         for ct in redundant_many_lwe {
             // private_key.debug_lwe("ct", &ct, ctx);
@@ -1398,7 +1360,6 @@ impl LUT {
             &mut glwe,
             &lwe_ciphertext_list,
         );
-        private_key.debug_glwe("glwe", &glwe, ctx);
 
         let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
         public_key.glwe_absorption_monic_monomial(&mut glwe, poly_monomial_degree);
@@ -1475,6 +1436,7 @@ impl LUT {
         LUT(glwe)
     }
 
+    /// creates a LUT whose first box is filled with copies of the given lwe
     pub fn from_lwe(lwe: &LweCiphertext<Vec<u64>>, public_key: &PublicKey, ctx: &Context) -> LUT {
         let mut output = GlweCiphertext::new(
             0,
@@ -1488,13 +1450,15 @@ impl LUT {
             &lwe,
         );
 
+        // fill the first box in log(box_size) glwe sums
         for i in 0..ctx.box_size().ilog2() {
             let mut other = output.clone();
             public_key.glwe_absorption_monic_monomial(&mut other, MonomialDegree(2usize.pow(i)));
             public_key.glwe_sum_assign(&mut output, &other);
         }
 
-        let poly_monomial_degree = MonomialDegree(ctx.polynomial_size().0 - ctx.box_size() / 2);
+        // center the box
+        let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
         public_key.glwe_absorption_monic_monomial(&mut output, poly_monomial_degree);
 
         LUT(output)
