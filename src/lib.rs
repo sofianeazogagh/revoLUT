@@ -1693,15 +1693,9 @@ impl LUT {
         );
     }
 
+    /// re-packs a fresh LUT from its sample extracts
     pub fn bootstrap(&self, public_key: &PublicKey, ctx: &Context) -> LUT {
-        // let n = self.0.polynomial_size().0 / ctx.box_size;
-        // let elements = Vec::from_iter((0..n).map(|i| public_key.sample_extract(self, i, ctx)));
         let many_lwe = self.to_many_lwe(public_key, ctx);
-        // let private_key = key(ctx.parameters);
-        // for (i, ciphertext) in many_lwe.iter().enumerate() {
-        //     let decrypted = private_key.decrypt_lwe(ciphertext, ctx);
-        //     println!("decrypted {}: {}", i, decrypted);
-        // }
         LUT::from_vec_of_lwe(many_lwe, public_key, ctx)
     }
 }

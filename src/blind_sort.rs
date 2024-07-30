@@ -1,8 +1,11 @@
 use std::sync::OnceLock;
 
-use tfhe::core_crypto::{
-    algorithms::{lwe_ciphertext_add_assign, lwe_ciphertext_sub_assign},
-    entities::LweCiphertext,
+use tfhe::{
+    core_crypto::{
+        algorithms::{lwe_ciphertext_add_assign, lwe_ciphertext_sub_assign},
+        entities::LweCiphertext,
+    },
+    shortint::parameters::*,
 };
 
 use crate::{Context, LUT};
@@ -13,16 +16,26 @@ use crate::{Context, LUT};
 /// 1 0 0
 /// 1 1 0
 /// ```
-fn cmp_matrix(ctx: &Context) -> &'static Vec<LUT> {
-    static MATRIX: OnceLock<Vec<LUT>> = OnceLock::new();
-    MATRIX.get_or_init(|| {
-        Vec::from_iter((0..ctx.full_message_modulus).map(|i| {
-            LUT::from_vec_trivially(
-                &Vec::from_iter((0..ctx.full_message_modulus).map(|j| if j < i { 1 } else { 0 })),
-                ctx,
-            )
+fn cmp_matrix(bitsize: usize) -> &'static Vec<LUT> {
+    let params = [
+        PARAM_MESSAGE_1_CARRY_0,
+        PARAM_MESSAGE_2_CARRY_0,
+        PARAM_MESSAGE_3_CARRY_0,
+        PARAM_MESSAGE_4_CARRY_0,
+        PARAM_MESSAGE_5_CARRY_0,
+    ];
+    static MATRICES: OnceLock<Vec<Vec<LUT>>> = OnceLock::new();
+    &MATRICES.get_or_init(|| {
+        Vec::from_iter((1..=5).map(|b| {
+            let n = 1 << b;
+            Vec::from_iter((0..n).map(|i| {
+                LUT::from_vec_trivially(
+                    &Vec::from_iter((0..n).map(|j| if j < i { 1 } else { 0 })),
+                    &Context::from(params[b - 1]),
+                )
+            }))
         }))
-    })
+    })[bitsize - 1]
 }
 
 impl crate::PublicKey {
@@ -33,7 +46,8 @@ impl crate::PublicKey {
         b: &LweCiphertext<Vec<u64>>,
         ctx: &Context,
     ) -> LweCiphertext<Vec<u64>> {
-        self.blind_matrix_access(cmp_matrix(ctx), b, a, ctx)
+        let bitsize = ctx.full_message_modulus().ilog2() as usize;
+        self.blind_matrix_access(cmp_matrix(bitsize), b, a, ctx)
     }
 
     /// Direct Sort of distinct values
@@ -100,6 +114,7 @@ impl crate::PublicKey {
             let x = self.sample_extract(&lut, i, ctx);
             self.blind_array_add_trivial(&mut count, &x, 1, ctx);
         }
+        count.bootstrap(self, ctx);
 
         // step 2: sort
         // println!("step 2: sorting");
@@ -109,7 +124,6 @@ impl crate::PublicKey {
         let isnull = LUT::from_function(|v| if v == 0 { 1 } else { 0 }, ctx);
 
         for _idx in 0..2 * n {
-            // println!("{}", idx);
             let x = self.blind_array_access(&i, &count, ctx);
             let b = self.run_lut(&x, &isnull, ctx);
             let mut notb = one.clone();
@@ -119,11 +133,12 @@ impl crate::PublicKey {
             self.blind_array_add(&mut result, &j, &y, ctx);
             let minusnotb = self.neg_lwe(&notb, ctx);
             self.blind_array_add(&mut count, &i, &minusnotb, ctx);
+            count.bootstrap(self, ctx);
             lwe_ciphertext_add_assign(&mut i, &b);
             lwe_ciphertext_add_assign(&mut j, &notb);
         }
 
-        result
+        result.bootstrap(self, ctx)
     }
 }
 
@@ -132,6 +147,7 @@ mod tests {
     use std::time::Instant;
 
     use crate::*;
+    use itertools::sorted;
     use tfhe::shortint::parameters::*;
 
     #[test]
@@ -157,21 +173,28 @@ mod tests {
 
     #[test]
     fn test_blind_sort_bma() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
-        let public_key = &private_key.public_key;
-        let array = vec![1, 2, 1, 0];
-        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        let params = [PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_3_CARRY_0];
+        let arrays = [vec![1, 2, 1, 0], vec![1, 3, 2, 4, 4, 7, 6, 5]];
+        for (&param, array) in params.iter().zip(arrays) {
+            let mut ctx = Context::from(param);
+            let private_key = key(ctx.parameters);
+            let public_key = &private_key.public_key;
+            let lut = LUT::from_vec(&array, &private_key, &mut ctx);
 
-        let sorted_lut = public_key.blind_sort_bma(lut, &ctx);
-        println!("sorted");
-        sorted_lut.print(&private_key, &ctx);
+            let begin = Instant::now();
+            let sorted_lut = public_key.blind_sort_bma(lut, &ctx);
+            let elapsed = Instant::now() - begin;
+            println!("{:?}", elapsed);
 
-        let expected_array = vec![0, 1, 1, 2];
-        for i in 0..ctx.full_message_modulus {
-            let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
-            let actual = private_key.decrypt_lwe(&lwe, &ctx);
-            assert_eq!(actual, expected_array[i]);
+            let expected_array = Vec::from_iter(sorted(array));
+            println!("expected: {:?}", expected_array);
+            println!("actual: ");
+            sorted_lut.print(&private_key, &ctx);
+            for i in 0..ctx.full_message_modulus {
+                let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
+                let actual = private_key.decrypt_lwe(&lwe, &ctx);
+                assert_eq!(actual, expected_array[i]);
+            }
         }
     }
 
@@ -224,9 +247,12 @@ mod tests {
         let public_key = &private_key.public_key;
         let array = vec![2, 1, 3, 1, 0, 0, 0, 0];
 
+        // for i in 0..100 {
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
-
+        // let begin = Instant::now();
         let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+        // let elapsed = Instant::now() - begin;
+        // println!("run {} ({:?})", i, elapsed);
 
         let expected_array = vec![0, 0, 0, 0, 1, 1, 2, 3];
         for i in 0..array.len() {
@@ -234,5 +260,6 @@ mod tests {
             let actual = private_key.decrypt_lwe(&lwe, &ctx);
             assert_eq!(actual, expected_array[i]);
         }
+        // }
     }
 }

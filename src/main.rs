@@ -62,24 +62,23 @@ pub fn generate_keys() {
 }
 
 pub fn main() {
-    generate_keys();
-    // let param = PARAM_MESSAGE_4_CARRY_0;
-    // let mut ctx = Context::from(param);
-    // let private_key = key(param);
-    // let public_key = &private_key.public_key;
-    // let array = vec![3, 2, 1, 2];
-    // let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+    // generate_keys();
+    let param = PARAM_MESSAGE_4_CARRY_0;
+    let mut ctx = Context::from(param);
+    let private_key = key(param);
+    let public_key = &private_key.public_key;
+    let array = vec![3, 2, 1, 2];
+    let lut = LUT::from_vec(&array, &private_key, &mut ctx);
 
-    // let now = Instant::now();
-    // let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
-    // println!("{:?}", Instant::now() - now);
+    let now = std::time::Instant::now();
+    let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+    println!("{:?}", std::time::Instant::now() - now);
 
-    // sorted_lut.print(&private_key, &ctx);
+    sorted_lut.print(&private_key, &ctx);
 
     // test_blind_tensor_access();
 
     // test_blind_permutation();
-
     // blind_array_access(); // from blind_array_access
 
     // blind_array_access2d(); // from unitest_bacc2d
