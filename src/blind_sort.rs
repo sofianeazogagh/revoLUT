@@ -112,7 +112,7 @@ impl crate::PublicKey {
         // println!("counting values");
         for i in 0..n {
             let x = self.sample_extract(&lut, i, ctx);
-            self.blind_array_add_trivial(&mut count, &x, 1, ctx);
+            self.blind_array_inject_trivial(&mut count, &x, 1, ctx);
         }
         count.bootstrap(self, ctx);
 
@@ -130,9 +130,9 @@ impl crate::PublicKey {
             lwe_ciphertext_sub_assign(&mut notb, &b);
             let f = LUT::from_lwe(&i, &self, &ctx);
             let y = self.run_lut(&b, &f, ctx);
-            self.blind_array_add(&mut result, &j, &y, ctx);
+            self.blind_array_inject(&mut result, &j, &y, ctx);
             let minusnotb = self.neg_lwe(&notb, ctx);
-            self.blind_array_add(&mut count, &i, &minusnotb, ctx);
+            self.blind_array_inject(&mut count, &i, &minusnotb, ctx);
             count.bootstrap(self, ctx);
             lwe_ciphertext_add_assign(&mut i, &b);
             lwe_ciphertext_add_assign(&mut j, &notb);

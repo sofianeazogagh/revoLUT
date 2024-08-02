@@ -1275,8 +1275,9 @@ impl PublicKey {
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
 
-    /// blindly adds x to the i-th coefficient of the given LUT
-    pub fn blind_array_add(
+    /// blindly adds x to the i-th box of the given LUT
+    /// this process is noisy and the LUT needs bootstrapping before being read
+    pub fn blind_array_inject(
         &self,
         lut: &mut LUT,
         i: &LweCiphertext<Vec<u64>>,
@@ -1289,7 +1290,7 @@ impl PublicKey {
         self.glwe_sum_assign(&mut lut.0, &other.0);
     }
 
-    pub fn blind_array_add_trivial(
+    pub fn blind_array_inject_trivial(
         &self,
         lut: &mut LUT,
         i: &LweCiphertext<Vec<u64>>,
@@ -2112,7 +2113,7 @@ mod test {
         let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
 
         lut.print(&private_key, &ctx);
-        public_key.blind_array_add(&mut lut, &lwe_i, &lwe_x, &ctx);
+        public_key.blind_array_inject(&mut lut, &lwe_i, &lwe_x, &ctx);
         lut.print(&private_key, &ctx);
         array[i as usize] = (array[i as usize] + x) % size as u64;
 
