@@ -6,17 +6,17 @@ extern crate quickcheck_macros;
 
 use aligned_vec::ABox;
 use num_complex::Complex;
-use rayon::{prelude::*, vec};
+use rayon::iter::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
+// use std::process::Output;
 use std::sync::OnceLock;
 use std::time::Instant;
 use tfhe::shortint::{CarryModulus, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
-use tfhe::shortint::parameters::{
-    ClassicPBSParameters, PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_4_CARRY_0,
-};
+use rayon::*;
+use tfhe::shortint::parameters::ClassicPBSParameters;
 use tfhe::shortint::prelude::CiphertextModulus;
 
 use rand::Rng;
@@ -111,10 +111,10 @@ impl Context {
         self.parameters.polynomial_size
     }
     pub fn lwe_modular_std_dev(&self) -> StandardDev {
-        self.parameters.lwe_modular_std_dev
+        self.parameters.lwe_noise_distribution.gaussian_std_dev()
     }
     pub fn glwe_modular_std_dev(&self) -> StandardDev {
-        self.parameters.glwe_modular_std_dev
+        self.parameters.glwe_noise_distribution.gaussian_std_dev()
     }
     pub fn pbs_base_log(&self) -> DecompositionBaseLog {
         self.parameters.pbs_base_log
@@ -135,7 +135,7 @@ impl Context {
         self.parameters.pbs_base_log
     }
     pub fn pfks_modular_std_dev(&self) -> StandardDev {
-        self.parameters.glwe_modular_std_dev
+        self.parameters.glwe_noise_distribution.gaussian_std_dev()
     }
     pub fn message_modulus(&self) -> MessageModulus {
         self.parameters.message_modulus
@@ -195,7 +195,7 @@ impl PrivateKey {
             &glwe_sk,
             ctx.pbs_base_log(),
             ctx.pbs_level(),
-            ctx.glwe_modular_std_dev(),
+            ctx.parameters.glwe_noise_distribution,
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
@@ -228,7 +228,7 @@ impl PrivateKey {
             &big_lwe_sk,
             &small_lwe_sk,
             &mut lwe_ksk,
-            ctx.lwe_modular_std_dev(),
+            ctx.parameters.lwe_noise_distribution,
             &mut ctx.encryption_generator,
         );
 
@@ -255,7 +255,7 @@ impl PrivateKey {
             &small_lwe_sk,
             &glwe_sk,
             &mut pfpksk,
-            ctx.pfks_modular_std_dev(),
+            ctx.parameters.glwe_noise_distribution,
             &mut ctx.encryption_generator,
             |x| x,
             &last_polynomial,
@@ -266,7 +266,7 @@ impl PrivateKey {
             &glwe_sk,
             ctx.pfks_base_log(),
             ctx.pfks_level(),
-            ctx.pfks_modular_std_dev(),
+            ctx.parameters.glwe_noise_distribution,
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
@@ -318,7 +318,7 @@ impl PrivateKey {
         let lwe_ciphertext: LweCiphertextOwned<u64> = allocate_and_encrypt_new_lwe_ciphertext(
             &self.small_lwe_sk,
             plaintext,
-            ctx.lwe_modular_std_dev(),
+            ctx.parameters.lwe_noise_distribution,
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
@@ -336,7 +336,7 @@ impl PrivateKey {
         let lwe_ciphertext: LweCiphertextOwned<u64> = allocate_and_encrypt_new_lwe_ciphertext(
             &self.big_lwe_sk,
             plaintext,
-            ctx.lwe_modular_std_dev(),
+            ctx.parameters.lwe_noise_distribution,
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
@@ -390,7 +390,7 @@ impl PrivateKey {
             self.get_glwe_sk(),
             &mut output_glwe,
             &pt_list,
-            ctx.glwe_modular_std_dev(),
+            ctx.parameters.glwe_noise_distribution,
             &mut ctx.encryption_generator,
         );
         output_glwe
@@ -421,7 +421,7 @@ impl PrivateKey {
             self.get_glwe_sk(),
             output_glwe,
             &pt,
-            ctx.glwe_modular_std_dev(),
+            ctx.parameters.glwe_noise_distribution,
             &mut ctx.encryption_generator,
         );
     }
@@ -737,6 +737,7 @@ impl PublicKey {
 
         return res;
     }
+
     pub fn glwe_sum(
         &self,
         ct1: &GlweCiphertext<Vec<u64>>,
@@ -844,46 +845,17 @@ impl PublicKey {
         column: &LweCiphertext<Vec<u64>>,
         ctx: &Context,
     ) -> LweCiphertext<Vec<u64>> {
-        let mut output = LweCiphertext::new(
-            0u64,
-            ctx.small_lwe_dimension().to_lwe_size(),
-            ctx.ciphertext_modulus(),
-        );
-
         // multi blind array access
-        let mut pbs_results: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
-        pbs_results.par_extend(matrix.into_par_iter().map(|acc| {
-            let mut pbs_ct = LweCiphertext::new(
-                0u64,
-                ctx.big_lwe_dimension().to_lwe_size(),
-                ctx.ciphertext_modulus(),
-            );
-            programmable_bootstrap_lwe_ciphertext(&column, &mut pbs_ct, &acc.0, &self.fourier_bsk);
-            let mut switched = LweCiphertext::new(
-                0,
-                ctx.small_lwe_dimension().to_lwe_size(),
-                ctx.ciphertext_modulus(),
-            );
-            keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
-            switched
-        }));
+        let vec_of_lwe: Vec<LweCiphertext<Vec<u64>>> = matrix
+            .into_par_iter()
+            .map(|lut| self.blind_array_access(column, lut, ctx))
+            .collect();
 
         // pack all the lwe
-        let accumulator_final = LUT::from_vec_of_lwe(pbs_results, self, &ctx);
+        let accumulator_final = LUT::from_vec_of_lwe(vec_of_lwe, self, &ctx);
+
         // final blind array access
-        let mut ct_res = LweCiphertext::new(
-            0u64,
-            ctx.big_lwe_dimension().to_lwe_size(),
-            ctx.ciphertext_modulus(),
-        );
-        programmable_bootstrap_lwe_ciphertext(
-            &line,
-            &mut ct_res,
-            &accumulator_final.0,
-            &self.fourier_bsk,
-        );
-        keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut output);
-        return output;
+        self.blind_array_access(&line, &accumulator_final, ctx)
     }
 
     pub fn blind_matrix_access_multi_values_opt(
@@ -935,7 +907,7 @@ impl PublicKey {
         let mut columns_lwe: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
         for line in new_matrix.iter() {
             let lut = LUT(self.glwe_absorption_polynomial(&mut only_lut_to_rotate.0, line));
-            let ct = self.at(&lut, 0, ctx);
+            let ct = self.sample_extract(&lut, 0, ctx);
             columns_lwe.push(ct);
         }
 
@@ -1055,10 +1027,6 @@ impl PublicKey {
         for i in 1..many_lut.len() {
             result_glwe = self.glwe_sum(&result_glwe, &many_lut[i].0);
         }
-
-        // Rotation of -half_box_size to get the accurate result when we sample extract
-        let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
-        self.glwe_absorption_monic_monomial(&mut result_glwe, poly_monomial_degree);
 
         LUT(result_glwe)
     }
@@ -1281,7 +1249,7 @@ impl PublicKey {
     }
 
     /// returns the ciphertext at index i from the given lut, accounting for redundancy
-    pub fn at(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
+    fn sample_extract(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
         let mut lwe = LweCiphertext::new(
             0u64,
             ctx.big_lwe_dimension.to_lwe_size(),
@@ -1305,6 +1273,34 @@ impl PublicKey {
         );
         programmable_bootstrap_lwe_ciphertext(&ct_input, &mut lwe, &lut.0, &self.fourier_bsk);
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
+    }
+
+    /// blindly adds x to the i-th box of the given LUT
+    /// this process is noisy and the LUT needs bootstrapping before being read
+    pub fn blind_array_inject(
+        &self,
+        lut: &mut LUT,
+        i: &LweCiphertext<Vec<u64>>,
+        x: &LweCiphertext<Vec<u64>>,
+        ctx: &Context,
+    ) {
+        let mut other = LUT::from_lwe(&x, &self, ctx);
+        let neg_i = self.neg_lwe(i, ctx);
+        blind_rotate_assign(&neg_i, &mut other.0, &self.fourier_bsk);
+        self.glwe_sum_assign(&mut lut.0, &other.0);
+    }
+
+    pub fn blind_array_inject_trivial(
+        &self,
+        lut: &mut LUT,
+        i: &LweCiphertext<Vec<u64>>,
+        x: u64,
+        ctx: &Context,
+    ) {
+        let mut other = LUT::from_vec_trivially(&vec![x], ctx);
+        let neg_i = self.neg_lwe(i, ctx);
+        blind_rotate_assign(&neg_i, &mut other.0, &self.fourier_bsk);
+        self.glwe_sum_assign(&mut lut.0, &other.0);
     }
 }
 
@@ -1369,15 +1365,6 @@ impl LUT {
         }
 
         redundant_many_lwe
-    }
-
-    fn add_redundancy(
-        lwe: &LweCiphertext<Vec<u64>>,
-        ctx: &Context,
-    ) -> Vec<LweCiphertext<Vec<u64>>> {
-        let box_size = ctx.box_size();
-        let redundant_lwe: Vec<LweCiphertext<Vec<u64>>> = vec![(*lwe).clone(); box_size];
-        redundant_lwe
     }
 
     /* Fill the boxes without multiplying the content by delta */
@@ -1476,6 +1463,7 @@ impl LUT {
         let redundant_many_lwe = Self::add_redundancy_many_lwe(many_lwe, &ctx);
         let mut lwe_container: Vec<u64> = Vec::new();
         for ct in redundant_many_lwe {
+            // private_key.debug_lwe("ct", &ct, ctx);
             let mut lwe = ct.into_container();
             lwe_container.append(&mut lwe);
         }
@@ -1494,7 +1482,7 @@ impl LUT {
         );
 
         // Keyswitch and pack
-        private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
             &mut glwe,
             &lwe_ciphertext_list,
@@ -1567,7 +1555,7 @@ impl LUT {
         );
 
         // Keyswitch and pack
-        private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
             &mut glwe,
             &lwe_ciphertext_list,
@@ -1575,89 +1563,51 @@ impl LUT {
         LUT(glwe)
     }
 
+    /// creates a LUT whose first box is filled with copies of the given lwe
     pub fn from_lwe(lwe: &LweCiphertext<Vec<u64>>, public_key: &PublicKey, ctx: &Context) -> LUT {
-        let redundant_lwe = Self::add_redundancy(lwe, &ctx);
-        let mut container: Vec<u64> = Vec::new();
-        for ct in redundant_lwe {
-            let mut lwe = ct.into_container();
-            container.append(&mut lwe);
-        }
-        let lwe_ciphertext_list = LweCiphertextList::from_container(
-            container,
-            ctx.small_lwe_dimension().to_lwe_size(),
-            ctx.ciphertext_modulus(),
-        );
-        // Prepare our output GLWE
-        let mut glwe = GlweCiphertext::new(
+        let mut output = GlweCiphertext::new(
             0,
             ctx.glwe_dimension().to_glwe_size(),
             ctx.polynomial_size(),
             ctx.ciphertext_modulus(),
         );
-        // Keyswitch and pack
-        private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+        par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
             &public_key.pfpksk,
-            &mut glwe,
-            &lwe_ciphertext_list,
+            &mut output,
+            &lwe,
         );
 
-        let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
-        public_key.glwe_absorption_monic_monomial(&mut glwe, poly_monomial_degree);
+        // fill the first box in log(box_size) glwe sums
+        for i in 0..ctx.box_size().ilog2() {
+            let mut other = output.clone();
+            public_key.glwe_absorption_monic_monomial(&mut other, MonomialDegree(2usize.pow(i)));
+            public_key.glwe_sum_assign(&mut output, &other);
+        }
 
-        LUT(glwe)
+        // center the box
+        let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
+        public_key.glwe_absorption_monic_monomial(&mut output, poly_monomial_degree);
+
+        LUT(output)
     }
 
+    /// Extract each element from the LUT into a LWE
     pub fn to_many_lwe(
         &self,
         public_key: &PublicKey,
         ctx: &Context,
     ) -> Vec<LweCiphertext<Vec<u64>>> {
-        let mut many_lwe: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
-        for i in 0..ctx.full_message_modulus() {
-            let mut lwe_sample = LweCiphertext::new(
-                0_64,
-                ctx.big_lwe_dimension().to_lwe_size(),
-                ctx.ciphertext_modulus(),
-            );
-            extract_lwe_sample_from_glwe_ciphertext(
-                &self.0,
-                &mut lwe_sample,
-                MonomialDegree(i * ctx.box_size() as usize),
-            );
-            let mut switched = LweCiphertext::new(
-                0,
-                ctx.small_lwe_dimension().to_lwe_size(),
-                ctx.ciphertext_modulus(),
-            );
-            keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_sample, &mut switched);
-            many_lwe.push(switched);
-        }
-        many_lwe
+        (0..ctx.full_message_modulus())
+            .map(|i| public_key.sample_extract(&self, i, ctx))
+            .collect()
     }
 
+    /// Make a LUT starting with each element from this LUT
     pub fn to_many_lut(&self, public_key: &PublicKey, ctx: &Context) -> Vec<LUT> {
-        // Extract each element from the LUT into a LWE
-        let many_lwe = self.to_many_lwe(public_key, ctx);
-
-        // Many-Lwe to Many-Glwe
-        let mut many_glwe: Vec<LUT> = Vec::new();
-        for lwe in many_lwe {
-            let mut glwe = GlweCiphertext::new(
-                0_u64,
-                ctx.glwe_dimension().to_glwe_size(),
-                ctx.polynomial_size(),
-                ctx.ciphertext_modulus(),
-            );
-            let redundancy_lwe = public_key.one_lwe_to_lwe_ciphertext_list(&lwe, ctx);
-            private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-                &public_key.pfpksk,
-                &mut glwe,
-                &redundancy_lwe,
-            );
-
-            many_glwe.push(LUT(glwe));
-        }
-        many_glwe
+        self.to_many_lwe(public_key, ctx)
+            .iter()
+            .map(|lwe| LUT::from_lwe(&lwe, public_key, ctx))
+            .collect()
     }
 
     pub fn add_lut(&self, lut_r: &LUT) -> LUT {
@@ -1742,6 +1692,12 @@ impl LUT {
             &mut self.0,
             MonomialDegree(2 * ctx.polynomial_size().0 - rotation),
         );
+    }
+
+    /// re-packs a fresh LUT from its sample extracts
+    pub fn bootstrap(&self, public_key: &PublicKey, ctx: &Context) -> LUT {
+        let many_lwe = self.to_many_lwe(public_key, ctx);
+        LUT::from_vec_of_lwe(many_lwe, public_key, ctx)
     }
 }
 
@@ -1886,7 +1842,6 @@ mod test {
 
     use itertools::Itertools;
     use quickcheck::TestResult;
-    use rayon::result;
     use tfhe::shortint::parameters::*;
 
     use super::*;
@@ -1940,15 +1895,18 @@ mod test {
 
     #[test]
     fn test_many_lwe_to_glwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = PrivateKey::new(&mut ctx);
         let public_key = &private_key.public_key;
-        let our_input: Vec<u64> = vec![1, 2, 3, 15];
+        let our_input: Vec<u64> = vec![0, 1, 2, 3];
         let mut many_lwe: Vec<LweCiphertext<Vec<u64>>> = vec![];
         for input in our_input {
             let lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
             many_lwe.push(lwe);
         }
+        // for lwe in many_lwe.clone() {
+        //     private_key.debug_lwe("ct", &lwe, &ctx);
+        // }
         let lut = LUT::from_vec_of_lwe(many_lwe, public_key, &ctx);
         let output_pt = private_key.decrypt_and_decode_glwe(&lut.0, &ctx);
         println!("Test many LWE to one GLWE");
@@ -1956,16 +1914,58 @@ mod test {
     }
 
     #[test]
-    fn test_lwe_to_lut() {
+    fn test_pack_many_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = PrivateKey::new(&mut ctx);
+        let public_key = &private_key.public_key;
+        let our_input: Vec<u64> = vec![0, 1, 2, 3];
+        let mut many_lwe: Vec<LweCiphertext<Vec<u64>>> = vec![];
+        for input in our_input {
+            let lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
+            many_lwe.push(lwe);
+        }
+        let mut glwe = GlweCiphertext::new(
+            0,
+            ctx.glwe_dimension().to_glwe_size(),
+            ctx.polynomial_size(),
+            ctx.ciphertext_modulus(),
+        );
+
+        let mut lwe_list = LweCiphertextList::new(
+            0_u64,
+            ctx.small_lwe_dimension().to_lwe_size(),
+            LweCiphertextCount(many_lwe.len()),
+            ctx.ciphertext_modulus(),
+        );
+        for (mut dst, src) in lwe_list.iter_mut().zip(many_lwe.iter()) {
+            dst.as_mut().copy_from_slice(src.as_ref());
+        }
+
+        par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+            &public_key.pfpksk,
+            &mut glwe,
+            &lwe_list,
+        );
+        let output_pt = private_key.decrypt_and_decode_glwe(&glwe, &ctx);
+        println!("Test many LWE to one GLWE");
+        println!("{:?}", output_pt);
+    }
+
+    #[test]
+    fn test_lut_from_lwe() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(PARAM_MESSAGE_4_CARRY_0);
         let public_key = &private_key.public_key;
-        let our_input = 8u64;
-        let lwe = private_key.allocate_and_encrypt_lwe(our_input, &mut ctx);
-        let lut = LUT::from_lwe(&lwe, public_key, &ctx);
-        let output_pt = private_key.decrypt_and_decode_glwe(&lut.0, &ctx);
-        println!("Test LWE to LUT");
-        println!("{:?}", output_pt);
+
+        for i in 0u64..16u64 {
+            let lwe = private_key.allocate_and_encrypt_lwe(i, &mut ctx);
+            let lut = LUT::from_lwe(&lwe, public_key, &ctx);
+            for j in 0..16u64 {
+                let output = public_key.sample_extract(&lut, j as usize, &ctx);
+                let actual = private_key.decrypt_lwe(&output, &ctx);
+                assert_eq!(actual, if j == 0 { i } else { 0 });
+            }
+        }
     }
 
     #[test]
@@ -2040,7 +2040,7 @@ mod test {
 
         let expected = array[i];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
-        let lwe = public_key.at(&lut, i, &ctx);
+        let lwe = public_key.sample_extract(&lut, i, &ctx);
         let actual = private_key.decrypt_lwe(&lwe, &ctx);
 
         TestResult::from_bool(actual == expected)
@@ -2094,15 +2094,95 @@ mod test {
             permuted.print(&private_key, &ctx);
 
             for i in 0..4u64 {
-                let lwe = public_key.at(&permuted, i as usize, &ctx);
+                let lwe = public_key.sample_extract(&permuted, i as usize, &ctx);
                 let actual = private_key.decrypt_lwe(&lwe, &ctx);
                 assert_eq!(actual, i);
             }
         }
     }
 
-    #[test]
+    fn blind_array_add_prop(mut array: Vec<u64>, i: u64, x: u64) -> bool {
+        let param = PARAM_MESSAGE_2_CARRY_0;
+        let size = param.message_modulus.0;
+        let mut ctx = Context::from(param);
+        let private_key = key(param);
+        let public_key = &private_key.public_key;
 
+        let lwe_i = private_key.allocate_and_encrypt_lwe(i, &mut ctx);
+        let lwe_x = private_key.allocate_and_encrypt_lwe(x, &mut ctx);
+        let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
+
+        lut.print(&private_key, &ctx);
+        public_key.blind_array_inject(&mut lut, &lwe_i, &lwe_x, &ctx);
+        lut.print(&private_key, &ctx);
+        array[i as usize] = (array[i as usize] + x) % size as u64;
+
+        (0..array.len()).all(|idx| {
+            let lwe = public_key.sample_extract(&lut, idx, &ctx);
+            let actual = private_key.decrypt_lwe(&lwe, &ctx);
+            println!("{}: {} == {}", idx, actual, array[idx]);
+            actual == array[idx]
+        })
+    }
+
+    #[quickcheck]
+    fn test_blind_array_add_quickcheck(mut array: Vec<u64>, i: u64, x: u64) -> TestResult {
+        let param = PARAM_MESSAGE_2_CARRY_0;
+        let size = param.message_modulus.0;
+        if array.len() == 0 {
+            return TestResult::discard();
+        }
+        array.truncate(size);
+        array.iter_mut().for_each(|v| *v %= size as u64);
+        let i = i % array.len() as u64;
+        let x = x % size as u64;
+        println!("{} {} {:?}", i, x, array);
+        TestResult::from_bool(blind_array_add_prop(array, i, x))
+    }
+
+    #[test]
+    fn test_lut_from_vec_of_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let expected = 1;
+        let data = vec![private_key.allocate_and_encrypt_lwe(expected, &mut ctx)];
+        // Vec::from_iter((0..4).map(|i| private_key.allocate_and_encrypt_lwe(i, &mut ctx)));
+
+        let lut = LUT::from_vec_of_lwe(data, public_key, &ctx);
+        private_key.debug_glwe("lut", &lut.0, &ctx);
+        let lwe = public_key.sample_extract(&lut, 0, &ctx);
+        let actual = private_key.decrypt_lwe(&lwe, &ctx);
+        assert_eq!(actual, expected);
+
+        // for i in 0..4 {
+        //     let actual = private_key.decrypt_lwe(&public_key.sample_extract(&lut, i, &ctx), &ctx);
+        //     println!("{}", i);
+        //     assert_eq!(actual, i as u64);
+        // }
+    }
+
+    #[test]
+    fn test_bootstrap() {
+        let ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let lut = LUT::from_vec_trivially(&vec![2, 0, 1, 3], &ctx);
+
+        let other = lut.bootstrap(public_key, &ctx);
+
+        for i in 0..ctx.full_message_modulus() {
+            let expected = private_key.decrypt_lwe(&public_key.sample_extract(&lut, i, &ctx), &ctx);
+            let actual = private_key.decrypt_lwe(&public_key.sample_extract(&other, i, &ctx), &ctx);
+
+            println!("idx: {}, actual: {}, expected: {}", i, actual, expected);
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
     fn test_absorption_glwe() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = key(ctx.parameters);

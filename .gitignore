@@ -24,3 +24,4 @@ src/gist.rs
 src/one_hot_slot.rs
 
 PrivateKey*
+flamegraph.svg
