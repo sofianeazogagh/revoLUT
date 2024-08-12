@@ -78,11 +78,13 @@ impl crate::PublicKey {
     ) -> Vec<LweCiphertext<Vec<u64>>> {
         let n = ctx.full_message_modulus;
         let mut cpt = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let identity = LUT::from_function(|x| x, ctx);
         let mut permutation = vec![];
         for i in 0..n {
             let mut current = self.sample_extract(&lut, i, ctx);
             let b = self.eq_scalar(&current, 0, ctx);
             lwe_ciphertext_add_assign(&mut cpt, &b);
+            cpt = self.run_lut(&cpt, &identity, ctx); // refresh cpt noise
             lwe_ciphertext_sub_assign(&mut current, &cpt);
             permutation.push(current);
         }
@@ -203,7 +205,7 @@ mod tests {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(PARAM_MESSAGE_4_CARRY_0);
         let public_key = &private_key.public_key;
-        let array = vec![1, 3, 2, 0];
+        let array = vec![1, 3, 2, 0, 6, 5, 7, 4, 8, 10, 9, 11, 13, 15, 14, 12];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
         print!("lut: ");
         lut.print(&private_key, &ctx);
@@ -214,11 +216,11 @@ mod tests {
         print!("sorted {:?}: ", elapsed);
         sorted_lut.print(&private_key, &ctx);
 
-        let expected_array = vec![1, 2, 3, 0];
-        for i in 0..4 {
+        let expected_array = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0];
+        for i in 0..expected_array.len() {
             let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
             let actual = private_key.decrypt_lwe(&lwe, &ctx);
-            assert_eq!(actual, expected_array[i]);
+            assert_eq!(actual, expected_array[i as usize]);
         }
     }
 
