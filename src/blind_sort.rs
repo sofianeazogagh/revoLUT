@@ -116,7 +116,6 @@ impl crate::PublicKey {
             let x = self.sample_extract(&lut, i, ctx);
             self.blind_array_inject_trivial(&mut count, &x, 1, ctx);
         }
-        count.bootstrap(self, ctx);
 
         // step 2: sort
         // println!("step 2: sorting");
@@ -124,8 +123,10 @@ impl crate::PublicKey {
         let mut i = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let mut j = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let isnull = LUT::from_function(|v| if v == 0 { 1 } else { 0 }, ctx);
+        let identity = LUT::from_function(|v| v, ctx);
 
         for _idx in 0..2 * n {
+            // count = count.bootstrap(self, ctx);
             let x = self.blind_array_access(&i, &count, ctx);
             let b = self.run_lut(&x, &isnull, ctx);
             let mut notb = one.clone();
@@ -135,12 +136,14 @@ impl crate::PublicKey {
             self.blind_array_inject(&mut result, &j, &y, ctx);
             let minusnotb = self.neg_lwe(&notb, ctx);
             self.blind_array_inject(&mut count, &i, &minusnotb, ctx);
-            count.bootstrap(self, ctx);
             lwe_ciphertext_add_assign(&mut i, &b);
+            i = self.run_lut(&i, &identity, ctx);
             lwe_ciphertext_add_assign(&mut j, &notb);
+            j = self.run_lut(&j, &identity, ctx);
         }
 
-        result.bootstrap(self, ctx)
+        // result.bootstrap(self, ctx)
+        result
     }
 }
 
