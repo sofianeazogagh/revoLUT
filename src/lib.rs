@@ -232,6 +232,24 @@ impl PrivateKey {
             &mut ctx.encryption_generator,
         );
 
+        let mut lwe_ksk_big = LweKeyswitchKey::new(
+            0u64,
+            ctx.ks_base_log(),
+            ctx.ks_level(),
+            ctx.small_lwe_dimension(),
+            ctx.big_lwe_dimension(),
+            ctx.ciphertext_modulus(),
+        );
+
+        generate_lwe_keyswitch_key(
+
+            &small_lwe_sk,
+            &big_lwe_sk,
+            &mut lwe_ksk_big,
+            ctx.lwe_modular_std_dev(),
+            &mut ctx.encryption_generator,
+        );
+
         // Create Packing Key Switch
 
         let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
@@ -272,6 +290,7 @@ impl PrivateKey {
 
         let public_key = PublicKey {
             lwe_ksk,
+            lwe_ksk_big,
             fourier_bsk,
             pfpksk,
             cbs_pfpksk,
@@ -290,6 +309,24 @@ impl PrivateKey {
         let (glwe_sk, small_lwe_sk,_parameters) = cks.into_raw_parts();
         let big_lwe_sk = glwe_sk.clone().into_lwe_secret_key();
         let(lwe_ksk, bsk) = (sks.key_switching_key.clone(), sks.bootstrapping_key.clone());
+
+        let mut lwe_ksk_big = LweKeyswitchKey::new(
+            0u64,
+            ctx.ks_base_log(),
+            ctx.ks_level(),
+            ctx.small_lwe_dimension(),
+            ctx.big_lwe_dimension(),
+            ctx.ciphertext_modulus(),
+        );
+
+        generate_lwe_keyswitch_key(
+
+            &small_lwe_sk,
+            &big_lwe_sk,
+            &mut lwe_ksk_big,
+            ctx.lwe_modular_std_dev(),
+            &mut ctx.encryption_generator,
+        );
 
         let fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>;
 
@@ -353,8 +390,11 @@ impl PrivateKey {
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
+
+
         let public_key = PublicKey {
             lwe_ksk,
+            lwe_ksk_big,
             fourier_bsk,
             pfpksk,
             cbs_pfpksk,
@@ -617,6 +657,7 @@ impl PrivateKey {
 pub struct PublicKey {
     // utilKey ou ServerKey ou CloudKey
     pub lwe_ksk: LweKeyswitchKey<Vec<u64>>,
+    pub lwe_ksk_big: LweKeyswitchKey<Vec<u64>>,
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
     pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub cbs_pfpksk: LwePrivateFunctionalPackingKeyswitchKeyListOwned<u64>,
