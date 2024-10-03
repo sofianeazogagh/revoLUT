@@ -921,6 +921,7 @@ impl PublicKey {
             ctx.ciphertext_modulus(),
         );
         programmable_bootstrap_lwe_ciphertext(&index, &mut output, &array.0, &self.fourier_bsk);
+        output
     }
 
     /// Get an element of a `matrix` given it `index_line` and it `index_column`
