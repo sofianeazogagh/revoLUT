@@ -909,6 +909,20 @@ impl PublicKey {
         return switched;
     }
 
+    pub fn blind_array_access_big(
+        &self,
+        index: &LweCiphertext<Vec<u64>>,
+        array: &LUT,
+        ctx: &Context,
+    ) -> LweCiphertext<Vec<u64>> {
+        let mut output = LweCiphertext::new(
+            0u64,
+            ctx.big_lwe_dimension().to_lwe_size(),
+            ctx.ciphertext_modulus(),
+        );
+        programmable_bootstrap_lwe_ciphertext(&index, &mut output, &array.0, &self.fourier_bsk);
+    }
+
     /// Get an element of a `matrix` given it `index_line` and it `index_column`
     pub fn blind_matrix_access(
         &self,
