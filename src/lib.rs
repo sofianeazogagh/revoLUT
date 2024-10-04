@@ -278,6 +278,32 @@ impl PrivateKey {
             &last_polynomial,
         );
 
+        let mut pfpksk_big = LwePrivateFunctionalPackingKeyswitchKey::new(
+            0,
+            ctx.pfks_base_log(),
+            ctx.pfks_level(),
+            ctx.big_lwe_dimension(),
+            ctx.glwe_dimension().to_glwe_size(),
+            ctx.polynomial_size(),
+            ctx.ciphertext_modulus(),
+        );
+
+        // Here there is some freedom for the choice of the last polynomial from algorithm 2
+        // By convention from the paper the polynomial we use here is the constant -1
+        let mut last_polynomial = Polynomial::new(0, ctx.polynomial_size());
+        // Set the constant term to u64::MAX == -1i64
+        last_polynomial[0] = u64::MAX;
+        // Generate the LWE private functional packing keyswitch key
+        par_generate_lwe_private_functional_packing_keyswitch_key(
+            &big_lwe_sk,
+            &glwe_sk,
+            &mut pfpksk_big,
+            ctx.pfks_modular_std_dev(),
+            &mut ctx.encryption_generator,
+            |x| x,
+            &last_polynomial,
+        );
+
         let cbs_pfpksk = par_allocate_and_generate_new_circuit_bootstrap_lwe_pfpksk_list(
             &big_lwe_sk,
             &glwe_sk,
@@ -293,6 +319,7 @@ impl PrivateKey {
             lwe_ksk_big,
             fourier_bsk,
             pfpksk,
+            pfpksk_big,
             cbs_pfpksk,
         };
 
@@ -380,6 +407,32 @@ impl PrivateKey {
             &last_polynomial,
         );
 
+        let mut pfpksk_big = LwePrivateFunctionalPackingKeyswitchKey::new(
+            0,
+            ctx.pfks_base_log(),
+            ctx.pfks_level(),
+            ctx.big_lwe_dimension(),
+            ctx.glwe_dimension().to_glwe_size(),
+            ctx.polynomial_size(),
+            ctx.ciphertext_modulus(),
+        );
+
+        // Here there is some freedom for the choice of the last polynomial from algorithm 2
+        // By convention from the paper the polynomial we use here is the constant -1
+        let mut last_polynomial = Polynomial::new(0, ctx.polynomial_size());
+        // Set the constant term to u64::MAX == -1i64
+        last_polynomial[0] = u64::MAX;
+        // Generate the LWE private functional packing keyswitch key
+        par_generate_lwe_private_functional_packing_keyswitch_key(
+            &big_lwe_sk,
+            &glwe_sk,
+            &mut pfpksk_big,
+            ctx.pfks_modular_std_dev(),
+            &mut ctx.encryption_generator,
+            |x| x,
+            &last_polynomial,
+        );
+
 
         let cbs_pfpksk = par_allocate_and_generate_new_circuit_bootstrap_lwe_pfpksk_list(
             &big_lwe_sk,
@@ -397,6 +450,7 @@ impl PrivateKey {
             lwe_ksk_big,
             fourier_bsk,
             pfpksk,
+            pfpksk_big,
             cbs_pfpksk,
         };
 
@@ -660,6 +714,7 @@ pub struct PublicKey {
     pub lwe_ksk_big: LweKeyswitchKey<Vec<u64>>,
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
     pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
+    pub pfpksk_big: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub cbs_pfpksk: LwePrivateFunctionalPackingKeyswitchKeyListOwned<u64>,
 }
 
@@ -1599,6 +1654,38 @@ impl LUT {
         // Keyswitch and pack
         private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
             &public_key.pfpksk,
+            &mut glwe,
+            &lwe_ciphertext_list,
+        );
+
+        let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
+        public_key.glwe_absorption_monic_monomial(&mut glwe, poly_monomial_degree);
+
+        LUT(glwe)
+    }
+
+    pub fn from_big_lwe(lwe: &LweCiphertext<Vec<u64>>, public_key: &PublicKey, ctx: &Context) -> LUT {
+        let redundant_lwe = Self::add_redundancy(lwe, &ctx);
+        let mut container: Vec<u64> = Vec::new();
+        for ct in redundant_lwe {
+            let mut lwe = ct.into_container();
+            container.append(&mut lwe);
+        }
+        let lwe_ciphertext_list = LweCiphertextList::from_container(
+            container,
+            ctx.big_lwe_dimension().to_lwe_size(),
+            ctx.ciphertext_modulus(),
+        );
+        // Prepare our output GLWE
+        let mut glwe = GlweCiphertext::new(
+            0,
+            ctx.glwe_dimension().to_glwe_size(),
+            ctx.polynomial_size(),
+            ctx.ciphertext_modulus(),
+        );
+        // Keyswitch and pack
+        private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+            &public_key.pfpksk_big,
             &mut glwe,
             &lwe_ciphertext_list,
         );

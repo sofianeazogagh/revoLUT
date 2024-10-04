@@ -39,7 +39,7 @@
 
 use std::fs;
 
-use revolut::{Context, PrivateKey};
+use revolut::{Context, PrivateKey,LUT};
 use tfhe::shortint::parameters::{PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_3_CARRY_0, PARAM_MESSAGE_4_CARRY_0, PARAM_MESSAGE_5_CARRY_0};
 use tfhe::shortint::ClientKey;
 use tfhe::shortint::ServerKey;
@@ -56,63 +56,13 @@ pub fn main() {
 
     let cks = ClientKey::new(param);
     let sks = ServerKey::new(&cks);
-    let private_key = PrivateKey::from_ClientKey(&mut ctx,cks,&sks);
-
-    // let big = cks.large_lwe_secret_key();
-    // let small = cks.small_lwe_secret_key();
-
-
 
     let private_key = PrivateKey::new(&mut ctx);
     let public_key = private_key.get_public_key();
 
-    // println!("generating keys and saving them to disk");
-    // let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-    // let private_key = PrivateKey::new(&mut ctx); // this takes time
-    // let _ = fs::write("PrivateKey2", &bincode::serialize(&private_key).unwrap());
-    // let mut ctx = Context::from(PARAM_MESSAGE_3_CARRY_0);
-    // let private_key = PrivateKey::new(&mut ctx); // this takes time
-    // let _ = fs::write("PrivateKey3", &bincode::serialize(&private_key).unwrap());
-    // let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-    // let private_key = PrivateKey::new(&mut ctx); // this takes time
-    // let _ = fs::write("PrivateKey4", &bincode::serialize(&private_key).unwrap());
-    // let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
-    // let private_key = PrivateKey::new(&mut ctx); // this takes time
-    // let _ = fs::write("PrivateKey5", &bincode::serialize(&private_key).unwrap());
+    let storage = cks.encrypt(2);
+    let lut_new_cell_content = LUT::from_big_lwe(&storage.ct,&public_key,&ctx);
+    private_key.debug_glwe("test glwe",&lut_new_cell_content.0,&ctx);
 
-    // test_blind_tensor_access();
 
-    // test_blind_permutation();
-
-    // blind_array_access(); // from blind_array_access
-
-    // blind_array_access2d(); // from unitest_bacc2d
-
-    // blind_permutation(); // from blind_permutation
-
-    // blind_insertion(); // from blind_insertion
-
-    // blind_retrieve(); // from blind_retrieve
-
-    // blind_push(); // from blind_push
-
-    // blind_pop(); // from blind_pop
-
-    // private_insert(); // from private_insert
-
-    // test_perf_comp();
-
-    // test_comp_with_bmacc();
-
-    // test_perf_blind_rotation();
-
-    // test_perf_extract_switch();
-
-    // test_perf_packing();
-
-    // test_perf_glwe_sum();
-
-    // test_perf_lwe_sum();
-
-    // gist::packing_test();
 }
