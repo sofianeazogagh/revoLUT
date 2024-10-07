@@ -1031,6 +1031,38 @@ impl PublicKey {
         LUT(result_glwe)
     }
 
+    pub fn blind_kmin(
+        &self,
+        lut: LUT,
+        ctx: &Context,
+        public_key: &PublicKey,
+        k: usize,
+    ) -> LweCiphertext<Vec<u64>> {
+        let n = ctx.full_message_modulus() as u64;
+        let id = LUT::from_vec_trivially(&Vec::from_iter(0..n), ctx); // should be cached
+        let permutation = lut.to_many_lwe(public_key, ctx);
+        let indices = self.blind_permutation(id, permutation, ctx);
+        public_key.sample_extract(&indices, k, ctx)
+    }
+
+    pub fn blind_argmin(
+        &self,
+        lut: LUT,
+        ctx: &Context,
+        public_key: &PublicKey,
+    ) -> LweCiphertext<Vec<u64>> {
+        self.blind_kmin(lut, ctx, public_key, 0)
+    }
+
+    pub fn blind_argmax(
+        &self,
+        lut: LUT,
+        ctx: &Context,
+        public_key: &PublicKey,
+    ) -> LweCiphertext<Vec<u64>> {
+        self.blind_kmin(lut, ctx, public_key, ctx.full_message_modulus() - 1)
+    }
+
     // Retrieve an element from a `lut` given it `index` and return the retrieved element with the new lut
     pub fn blind_retrieve(
         &self,
@@ -2098,6 +2130,32 @@ mod test {
                 let actual = private_key.decrypt_lwe(&lwe, &ctx);
                 assert_eq!(actual, i);
             }
+        }
+    }
+
+    #[test]
+    fn test_blind_argmin_all_distinct() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
+        let public_key = &private_key.public_key;
+
+        for array in (0..4u64).permutations(4) {
+            let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+            print!("lut: ");
+            lut.print(&private_key, &ctx);
+
+            let begin = Instant::now();
+            let actual = public_key.blind_argmin(lut, &ctx, public_key);
+            let elapsed = Instant::now() - begin;
+            let decrypted = private_key.decrypt_lwe(&actual, &ctx);
+            println!("actual: {} ({:?}): ", decrypted, elapsed);
+            let pos = array
+                .iter()
+                .enumerate()
+                .min_by(|x, y| x.1.cmp(y.1))
+                .unwrap()
+                .0 as u64;
+            assert_eq!(decrypted, pos);
         }
     }
 
