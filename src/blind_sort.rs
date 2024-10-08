@@ -98,19 +98,11 @@ impl crate::PublicKey {
         let n = ctx.full_message_modulus;
 
         // read the lut as a permutation, and apply it to itself
-        let now = Instant::now();
         let permutation = Vec::from_iter((0..n).map(|i| self.sample_extract(&lut, i, &ctx)));
-        let elapsed = Instant::now() - now;
-        println!("map sample extract: {:?}", elapsed);
-        let now = Instant::now();
         let permuted_lut = self.blind_permutation(lut, permutation, ctx);
-        let elapsed = Instant::now() - now;
-        println!("first bp: {:?}", elapsed);
 
         // compacts non-null values to the left
         let second_permutation = self.compute_compact_permutation(&permuted_lut, ctx);
-        let elapsed = Instant::now() - now;
-        println!("compute compact perm: {:?}", elapsed);
         self.blind_permutation(permuted_lut, second_permutation, ctx)
     }
 
