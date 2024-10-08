@@ -1042,36 +1042,20 @@ impl PublicKey {
         LUT(result_glwe)
     }
 
-    pub fn blind_kmin(
-        &self,
-        lut: LUT,
-        ctx: &Context,
-        public_key: &PublicKey,
-        k: usize,
-    ) -> LweCiphertext<Vec<u64>> {
+    pub fn blind_kmin(&self, lut: LUT, ctx: &Context, k: usize) -> LweCiphertext<Vec<u64>> {
         let n = ctx.full_message_modulus() as u64;
         let id = LUT::from_vec_trivially(&Vec::from_iter(0..n), ctx); // should be cached
-        let permutation = lut.to_many_lwe(public_key, ctx);
+        let permutation = lut.to_many_lwe(&self, ctx);
         let indices = self.blind_permutation(id, permutation, ctx);
-        public_key.sample_extract(&indices, k, ctx)
+        self.sample_extract(&indices, k, ctx)
     }
 
-    pub fn blind_argmin(
-        &self,
-        lut: LUT,
-        ctx: &Context,
-        public_key: &PublicKey,
-    ) -> LweCiphertext<Vec<u64>> {
-        self.blind_kmin(lut, ctx, public_key, 0)
+    pub fn blind_argmin(&self, lut: LUT, ctx: &Context) -> LweCiphertext<Vec<u64>> {
+        self.blind_kmin(lut, ctx, 0)
     }
 
-    pub fn blind_argmax(
-        &self,
-        lut: LUT,
-        ctx: &Context,
-        public_key: &PublicKey,
-    ) -> LweCiphertext<Vec<u64>> {
-        self.blind_kmin(lut, ctx, public_key, ctx.full_message_modulus() - 1)
+    pub fn blind_argmax(&self, lut: LUT, ctx: &Context) -> LweCiphertext<Vec<u64>> {
+        self.blind_kmin(lut, ctx, ctx.full_message_modulus() - 1)
     }
 
     // Retrieve an element from a `lut` given it `index` and return the retrieved element with the new lut
@@ -2156,7 +2140,7 @@ mod test {
             lut.print(&private_key, &ctx);
 
             let begin = Instant::now();
-            let actual = public_key.blind_argmin(lut, &ctx, public_key);
+            let actual = public_key.blind_argmin(lut, &ctx);
             let elapsed = Instant::now() - begin;
             let decrypted = private_key.decrypt_lwe(&actual, &ctx);
             println!("actual: {} ({:?}): ", decrypted, elapsed);

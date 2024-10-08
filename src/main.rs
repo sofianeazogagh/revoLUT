@@ -40,7 +40,7 @@
 use std::fs;
 
 use revolut::*;
-use tfhe::shortint::parameters::*;
+use tfhe::{boolean::parameters::PARAMETERS_ERROR_PROB_2_POW_MINUS_165, shortint::parameters::*};
 
 // mod uni_test;
 // use uni_test::*;
@@ -69,12 +69,15 @@ pub fn main() {
     let public_key = &private_key.public_key;
     let array = vec![3, 2, 1, 2];
     let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+    let permutation = (0..16)
+        .map(|i| private_key.allocate_and_encrypt_lwe(i, &mut ctx))
+        .collect();
 
     let now = std::time::Instant::now();
-    let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+    // let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+    // let _ = public_key.blind_sort_2bp(lut, &ctx);
+    let _ = public_key.blind_permutation(lut, permutation, &ctx);
     println!("{:?}", std::time::Instant::now() - now);
-
-    sorted_lut.print(&private_key, &ctx);
 
     // test_blind_tensor_access();
 
