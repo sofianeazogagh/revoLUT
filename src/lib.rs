@@ -34,10 +34,10 @@ pub fn random_lut(param: ClassicPBSParameters) -> LUT {
 pub fn key(param: ClassicPBSParameters) -> &'static PrivateKey {
     let bitsize = param.message_modulus.0.ilog2() as usize;
     static KEYS: OnceLock<Vec<OnceLock<PrivateKey>>> = OnceLock::new();
-    KEYS.get_or_init(|| Vec::from_iter((0..8).map(|_| OnceLock::new())))[bitsize].get_or_init(
+    KEYS.get_or_init(|| Vec::from_iter((0..9).map(|_| OnceLock::new())))[bitsize].get_or_init(
         || {
             PrivateKey::from_file(&format!("PrivateKey{}", bitsize))
-                .unwrap_or(PrivateKey::new(&mut Context::from(param)))
+                .unwrap_or(PrivateKey::to_file(&mut Context::from(param)))
         },
     )
 }
@@ -284,6 +284,17 @@ impl PrivateKey {
             glwe_sk,
             public_key,
         }
+    }
+
+    /// Generate a new private key and save it to file PrivateKeyN
+    pub fn to_file(ctx: &mut Context) -> PrivateKey {
+        let key = Self::new(ctx);
+        let n = ctx.full_message_modulus().ilog2();
+        let _ = fs::write(
+            format!("PrivateKey{}", n),
+            bincode::serialize(&key).unwrap(),
+        );
+        key
     }
 
     /// Load a private key from a file instead of generating it

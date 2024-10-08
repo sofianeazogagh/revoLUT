@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::{sync::OnceLock, time::Instant};
 
 use tfhe::{
     core_crypto::{
@@ -79,10 +79,11 @@ impl crate::PublicKey {
         let n = ctx.full_message_modulus;
         let mut cpt = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let identity = LUT::from_function(|x| x, ctx);
+        let isnull = LUT::from_function(|x| if x == 0 { 1 } else { 0 }, ctx);
         let mut permutation = vec![];
         for i in 0..n {
             let mut current = self.sample_extract(&lut, i, ctx);
-            let b = self.eq_scalar(&current, 0, ctx);
+            let b = self.run_lut(&current, &isnull, &ctx);
             lwe_ciphertext_add_assign(&mut cpt, &b);
             cpt = self.run_lut(&cpt, &identity, ctx); // refresh cpt noise
             lwe_ciphertext_sub_assign(&mut current, &cpt);
@@ -97,11 +98,19 @@ impl crate::PublicKey {
         let n = ctx.full_message_modulus;
 
         // read the lut as a permutation, and apply it to itself
+        let now = Instant::now();
         let permutation = Vec::from_iter((0..n).map(|i| self.sample_extract(&lut, i, &ctx)));
+        let elapsed = Instant::now() - now;
+        println!("map sample extract: {:?}", elapsed);
+        let now = Instant::now();
         let permuted_lut = self.blind_permutation(lut, permutation, ctx);
+        let elapsed = Instant::now() - now;
+        println!("first bp: {:?}", elapsed);
 
         // compacts non-null values to the left
         let second_permutation = self.compute_compact_permutation(&permuted_lut, ctx);
+        let elapsed = Instant::now() - now;
+        println!("compute compact perm: {:?}", elapsed);
         self.blind_permutation(permuted_lut, second_permutation, ctx)
     }
 
