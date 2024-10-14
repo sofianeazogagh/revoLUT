@@ -779,6 +779,30 @@ impl PublicKey {
             .for_each(|(dst, &rhs)| *dst += rhs);
     }
 
+    pub fn glwe_sum_polynomial(
+        &self,
+        glwe: &mut GlweCiphertext<Vec<u64>>,
+        poly: &Polynomial<Vec<u64>>,
+    ) -> GlweCiphertext<Vec<u64>> {
+        let mut res = GlweCiphertext::new(
+            0_u64,
+            glwe.glwe_size(),
+            glwe.polynomial_size(),
+            glwe.ciphertext_modulus(),
+        );
+
+        res.as_mut_polynomial_list()
+            .iter_mut()
+            .zip(glwe.as_polynomial_list().iter())
+            .for_each(|(mut dst, lhs)| {
+                // Ajoute le polynôme `lhs` au polynôme `poly` et stocke le résultat dans `dst`
+                polynomial_wrapping_add_assign(&mut dst, &lhs);
+                polynomial_wrapping_add_assign(&mut dst, &poly);
+            });
+
+        return res;
+    }
+
     // TODO : nom a changer : plaintext -> cleartext puisque Plaintext = Plaintext(cleartext)
     pub fn lwe_ciphertext_plaintext_add(
         &self,
@@ -2264,7 +2288,23 @@ mod test {
         let res = public_key.glwe_ciphertext_plaintext_mul(&glwe, constant);
         private_key.debug_glwe("res = ", &res, &ctx);
     }
+    #[test]
+    fn test_glwe_sum_polynomial() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
 
+        let mut glwe = private_key.allocate_and_encrypt_glwe(
+            PlaintextList::from_container(vec![1_u64 * ctx.delta(); ctx.polynomial_size().0]),
+            &mut ctx,
+        );
+        let poly = Polynomial::from_container(vec![2_u64 * ctx.delta(); ctx.polynomial_size().0]);
+
+        let result = public_key.glwe_sum_polynomial(&mut glwe, &poly);
+
+        private_key.debug_glwe("glwe = ", &glwe, &ctx);
+        private_key.debug_glwe("result = ", &result, &ctx);
+    }
     #[test]
     fn test_absorption_glwe() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
