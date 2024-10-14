@@ -1,42 +1,6 @@
 // #![allow(dead_code)]
 // #![allow(unused_variables)]
 
-// mod blind_array_access;
-
-// mod blind_array_access2d;
-
-// mod blind_permutation;
-
-// mod blind_insertion;
-
-// mod blind_push;
-
-// mod blind_pop;
-
-// mod blind_retrieve;
-
-// mod private_insert;
-// use crate::private_insert::private_insert;
-
-// mod test_perf_basic_op;
-// use crate::test_perf_basic_op::*;
-
-// mod uni_test;
-
-// mod blind_sort;
-// use crate::blind_sort::*;
-
-// mod blind_tensor_access;
-// use blind_tensor_access::*;
-
-// mod demultiplexer;
-// use crate::demultiplexer::demultiplixer;
-
-// mod gist;
-// use crate::gist::*;
-
-// mod headers;
-
 use std::fs;
 
 use revolut::*;

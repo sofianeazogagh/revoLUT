@@ -824,6 +824,22 @@ impl PublicKey {
         return res;
     }
 
+    pub fn glwe_ciphertext_plaintext_mul(
+        &self,
+        glwe: &GlweCiphertext<Vec<u64>>,
+        constant: u64,
+    ) -> GlweCiphertext<Vec<u64>> {
+        let mut res = GlweCiphertext::new(
+            0_u64,
+            glwe.glwe_size(),
+            glwe.polynomial_size(),
+            glwe.ciphertext_modulus(),
+        );
+
+        glwe_ciphertext_cleartext_mul(&mut res, &glwe, Cleartext(constant));
+        return res;
+    }
+
     // revoLUT operations
 
     /// Get an element of an `array` given it `index`
@@ -2233,6 +2249,20 @@ mod test {
             println!("idx: {}, actual: {}, expected: {}", i, actual, expected);
             assert_eq!(actual, expected);
         }
+    }
+
+    #[test]
+    fn test_glwe_ciphertext_plaintext_mul() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+        let plaintext_list =
+            PlaintextList::from_container(vec![1_u64 * ctx.delta(); ctx.polynomial_size().0]);
+        let glwe = private_key.allocate_and_encrypt_glwe(plaintext_list, &mut ctx);
+        private_key.debug_glwe("glwe = ", &glwe, &ctx);
+        let constant = 2_u64;
+        let res = public_key.glwe_ciphertext_plaintext_mul(&glwe, constant);
+        private_key.debug_glwe("res = ", &res, &ctx);
     }
 
     #[test]
