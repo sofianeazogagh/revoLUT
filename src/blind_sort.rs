@@ -1,4 +1,4 @@
-use std::{sync::OnceLock, time::Instant};
+use std::sync::OnceLock;
 
 use tfhe::{
     core_crypto::{

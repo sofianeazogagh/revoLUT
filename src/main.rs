@@ -4,7 +4,7 @@
 use std::fs;
 
 use revolut::*;
-use tfhe::{boolean::parameters::PARAMETERS_ERROR_PROB_2_POW_MINUS_165, shortint::parameters::*};
+use tfhe::shortint::parameters::*;
 
 // mod uni_test;
 // use uni_test::*;
