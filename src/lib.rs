@@ -1329,6 +1329,46 @@ impl PublicKey {
         blind_rotate_assign(&neg_i, &mut other.0, &self.fourier_bsk);
         self.glwe_sum_assign(&mut lut.0, &other.0);
     }
+
+    // retrieves the encrypted index of the first occurence of x in the given lut
+    pub fn blind_index(
+        &self,
+        lut: &LUT,
+        x: LweCiphertext<Vec<u64>>,
+        ctx: &Context,
+    ) -> LweCiphertext<Vec<u64>> {
+        let n = ctx.full_message_modulus();
+        let mut i = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let mut f = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let iszero = LUT::from_vec_trivially(&vec![1], ctx);
+        for j in 0..n {
+            // sample extract
+            let e = self.sample_extract(&lut, j, ctx);
+
+            // z = (x == e)
+            let mut z = self.allocate_and_trivially_encrypt_lwe(0u64, ctx);
+            lwe_ciphertext_sub(&mut z, &x, &e);
+            z = self.run_lut(&z, &iszero, ctx);
+
+            // i = f ? j : i
+            // i += (z and not f) * j
+            // i += (1 - f + z) * j
+            let mut acc = self.allocate_and_trivially_encrypt_lwe(1, ctx);
+            lwe_ciphertext_sub_assign(&mut acc, &f);
+            lwe_ciphertext_add_assign(&mut acc, &z);
+            let jifzandnotf = LUT::from_vec_trivially(&vec![0, 0, j as u64], &ctx);
+            let maybej = self.run_lut(&acc, &jifzandnotf, &ctx);
+            lwe_ciphertext_add_assign(&mut i, &maybej);
+
+            // f |= z
+            lwe_ciphertext_add_assign(&mut z, &f);
+            z = self.run_lut(&z, &iszero, ctx);
+            f = self.allocate_and_trivially_encrypt_lwe(1u64, ctx);
+            lwe_ciphertext_sub_assign(&mut f, &z);
+        }
+
+        i
+    }
 }
 
 pub struct LUT(pub GlweCiphertext<Vec<u64>>);
@@ -2328,4 +2368,43 @@ mod test {
             result_decrypted
         );
     }
+
+    #[test]
+    fn test_blind_index() {
+        let ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+        let n = ctx.full_message_modulus();
+
+        // let mut total = Duration::default();
+        // let mut runs = 0;
+        // for array in (0..4u64).permutations(4) {
+        let array = Vec::from_iter(0u64..n as u64);
+        let lut = LUT::from_vec_trivially(&array, &ctx);
+        for needle in 0..4 {
+            let x = public_key.allocate_and_trivially_encrypt_lwe(needle, &ctx);
+
+            let begin = Instant::now();
+            let i = public_key.blind_index(&lut, x, &ctx);
+            let elapsed = Instant::now() - begin;
+            // total += elapsed;
+            // runs += 1;
+
+            let expected = array
+                .iter()
+                .enumerate()
+                .find(|&(_, x)| x == &needle)
+                .unwrap()
+                .0 as u64;
+            let actual = private_key.decrypt_lwe(&i, &ctx);
+
+            println!(
+                "array: {:?}, needle: {}, actual: {}, expected: {} ({:?})",
+                array, needle, actual, expected, elapsed
+            );
+            assert_eq!(actual, expected);
+        }
+    }
+    // println!("avg time: {:?}", total / runs);
+    // }
 }
