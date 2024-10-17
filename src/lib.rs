@@ -795,24 +795,21 @@ impl PublicKey {
 
     pub fn glwe_sum_polynomial(
         &self,
-        glwe: &mut GlweCiphertext<Vec<u64>>,
+        glwe: &GlweCiphertext<Vec<u64>>,
         poly: &Polynomial<Vec<u64>>,
+        ctx: &Context,
     ) -> GlweCiphertext<Vec<u64>> {
-        let mut res = GlweCiphertext::new(
-            0_u64,
-            glwe.glwe_size(),
-            glwe.polynomial_size(),
-            glwe.ciphertext_modulus(),
-        );
+        let mut res = glwe.clone();
 
-        res.as_mut_polynomial_list()
-            .iter_mut()
-            .zip(glwe.as_polynomial_list().iter())
-            .for_each(|(mut dst, lhs)| {
-                // Ajoute le polynôme `lhs` au polynôme `poly` et stocke le résultat dans `dst`
-                polynomial_wrapping_add_assign(&mut dst, &lhs);
-                polynomial_wrapping_add_assign(&mut dst, &poly);
-            });
+        // Scale the polynomial by delta
+        let plain = PlaintextList::from_container(
+            poly.as_ref()
+                .to_vec()
+                .iter()
+                .map(|x| x * ctx.delta())
+                .collect::<Vec<u64>>(),
+        );
+        glwe_ciphertext_plaintext_list_add_assign(&mut res, &plain);
 
         return res;
     }
@@ -2377,13 +2374,14 @@ mod test {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let mut glwe = private_key.allocate_and_encrypt_glwe(
-            PlaintextList::from_container(vec![1_u64 * ctx.delta(); ctx.polynomial_size().0]),
-            &mut ctx,
-        );
-        let poly = Polynomial::from_container(vec![2_u64 * ctx.delta(); ctx.polynomial_size().0]);
+        let glwe = private_key
+            .allocate_and_encrypt_glwe_from_vec(&vec![1_u64; ctx.polynomial_size().0], &mut ctx);
 
-        let result = public_key.glwe_sum_polynomial(&mut glwe, &poly);
+        let poly = Polynomial::from_container(vec![2_u64; ctx.polynomial_size().0]);
+
+        println!("poly = {:?}", poly.as_ref().to_vec());
+
+        let result = public_key.glwe_sum_polynomial(&glwe, &poly, &ctx);
 
         private_key.debug_glwe("glwe = ", &glwe, &ctx);
         private_key.debug_glwe("result = ", &result, &ctx);
