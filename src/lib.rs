@@ -437,6 +437,20 @@ impl PrivateKey {
         );
     }
 
+    pub fn allocate_and_encrypt_glwe_from_vec(
+        &self,
+        vec: &Vec<u64>,
+        ctx: &mut Context,
+    ) -> GlweCiphertext<Vec<u64>> {
+        let mut encoded_vec: Vec<u64> = vec.iter().map(|x| x * ctx.delta()).collect();
+        if encoded_vec.len() < ctx.polynomial_size().0 {
+            encoded_vec.resize(ctx.polynomial_size().0, 0_u64);
+        }
+        let output_glwe =
+            self.allocate_and_encrypt_glwe(PlaintextList::from_container(encoded_vec), ctx);
+        output_glwe
+    }
+
     pub fn decrypt_and_decode_glwe_as_neg(
         &self,
         input_glwe: &GlweCiphertext<Vec<u64>>,
@@ -731,7 +745,7 @@ impl PublicKey {
 
     pub fn glwe_absorption_polynomial(
         &self,
-        glwe: &mut GlweCiphertext<Vec<u64>>,
+        glwe: &GlweCiphertext<Vec<u64>>,
         poly: &Polynomial<Vec<u64>>,
     ) -> GlweCiphertext<Vec<u64>> {
         let mut res = GlweCiphertext::new(
@@ -1090,6 +1104,19 @@ impl PublicKey {
         self.sample_extract(&indices, k, ctx)
     }
 
+    pub fn blind_private_kmin(
+        &self,
+        lut: LUT,
+        ctx: &Context,
+        k: LweCiphertext<Vec<u64>>,
+    ) -> LweCiphertext<Vec<u64>> {
+        let n = ctx.full_message_modulus() as u64;
+        let id = LUT::from_vec_trivially(&Vec::from_iter(0..n), ctx); // should be cached
+        let permutation = lut.to_many_lwe(&self, ctx);
+        let indices = self.blind_permutation(id, permutation, ctx);
+        self.blind_array_access(&k, &indices, ctx)
+    }
+
     pub fn blind_argmin(&self, lut: LUT, ctx: &Context) -> LweCiphertext<Vec<u64>> {
         self.blind_kmin(lut, ctx, 0)
     }
@@ -1316,13 +1343,29 @@ impl PublicKey {
     }
 
     /// returns the ciphertext at index i from the given lut, accounting for redundancy
-    fn sample_extract(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
+    pub fn sample_extract(&self, lut: &LUT, i: usize, ctx: &Context) -> LweCiphertext<Vec<u64>> {
         let mut lwe = LweCiphertext::new(
             0u64,
             ctx.big_lwe_dimension.to_lwe_size(),
             ctx.ciphertext_modulus,
         );
         extract_lwe_sample_from_glwe_ciphertext(&lut.0, &mut lwe, MonomialDegree(i * ctx.box_size));
+        self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
+    }
+
+    pub fn sample_extract_in_glwe(
+        &self,
+        glwe: &GlweCiphertext<Vec<u64>>,
+        i: usize,
+        ctx: &Context,
+    ) -> LweCiphertext<Vec<u64>> {
+        let mut lwe = LweCiphertext::new(
+            0u64,
+            ctx.big_lwe_dimension.to_lwe_size(),
+            ctx.ciphertext_modulus,
+        );
+        extract_lwe_sample_from_glwe_ciphertext(&glwe, &mut lwe, MonomialDegree(i * ctx.box_size));
+
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
 
@@ -1374,7 +1417,7 @@ impl PublicKey {
     pub fn blind_index(
         &self,
         lut: &LUT,
-        x: LweCiphertext<Vec<u64>>,
+        x: &LweCiphertext<Vec<u64>>,
         ctx: &Context,
     ) -> LweCiphertext<Vec<u64>> {
         let n = ctx.full_message_modulus();
@@ -1553,7 +1596,7 @@ impl LUT {
         LUT(lut_as_glwe)
     }
 
-    fn from_vec_trivially(data: &Vec<u64>, ctx: &Context) -> LUT {
+    pub fn from_vec_trivially(data: &Vec<u64>, ctx: &Context) -> LUT {
         let redundant_lut = Self::add_redundancy_and_encode_many_u64(data, ctx);
         LUT(allocate_and_trivially_encrypt_new_glwe_ciphertext(
             ctx.glwe_dimension().to_glwe_size(),
@@ -2350,13 +2393,39 @@ mod test {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
-        let array = vec![0, 1, 2, 3];
-        let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
-        private_key.debug_glwe("glwe = ", &lut.0, &ctx);
-        let mut poly = Polynomial::new(0_u64, ctx.polynomial_size());
-        poly[0] = 1_u64;
-        let res = public_key.glwe_absorption_polynomial(&mut lut.0, &poly);
-        private_key.debug_glwe("res = ", &res, &ctx);
+
+        /* Initialization */
+        let vec: Vec<u64> = vec![
+            rand::random::<u64>() % ctx.full_message_modulus() as u64;
+            ctx.polynomial_size().0
+        ];
+        let mut glwe = private_key.allocate_and_encrypt_glwe_from_vec(&vec, &mut ctx);
+
+        /* Create a random polynomial */
+        let container: Vec<u64> = vec![
+            rand::random::<u64>() % ctx.full_message_modulus() as u64;
+            ctx.polynomial_size().0
+        ];
+        let poly = Polynomial::from_container(container);
+
+        /* Absorption */
+        let res = public_key.glwe_absorption_polynomial(&mut glwe, &poly);
+
+        /* Decryption */
+        let decrypted_res = private_key.decrypt_and_decode_glwe(&res, &ctx);
+
+        /* Verification */
+        let poly_in_glwe = Polynomial::from_container(vec);
+        let mut expected = Polynomial::new(0_u64, ctx.polynomial_size());
+        polynomial_karatsuba_wrapping_mul(&mut expected, &poly_in_glwe, &poly);
+
+        // reduce the result to the message space as in the decryption process
+        expected
+            .as_mut()
+            .iter_mut()
+            .for_each(|x| *x %= ctx.full_message_modulus() as u64);
+
+        assert_eq!(expected.as_ref().to_vec(), decrypted_res);
     }
 
     #[test]
@@ -2455,7 +2524,7 @@ mod test {
             let x = public_key.allocate_and_trivially_encrypt_lwe(needle, &ctx);
 
             let begin = Instant::now();
-            let i = public_key.blind_index(&lut, x, &ctx);
+            let i = public_key.blind_index(&lut, &x, &ctx);
             let elapsed = Instant::now() - begin;
             // total += elapsed;
             // runs += 1;
