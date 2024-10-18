@@ -12,7 +12,7 @@ fn bench_bcs(c: &mut Criterion, param: ClassicPBSParameters) {
             |lut| {
                 private_key
                     .public_key
-                    .blind_counting_sort(black_box(lut), &Context::from(param))
+                    .blind_counting_sort(black_box(&lut), &Context::from(param))
             },
             BatchSize::SmallInput,
         )

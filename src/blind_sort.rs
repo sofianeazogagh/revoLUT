@@ -106,7 +106,7 @@ impl crate::PublicKey {
         self.blind_permutation(permuted_lut, second_permutation, ctx)
     }
 
-    pub fn blind_counting_sort(&self, lut: LUT, ctx: &Context) -> LUT {
+    pub fn blind_counting_sort(&self, lut: &LUT, ctx: &Context) -> LUT {
         let n = ctx.full_message_modulus;
         let mut count = LUT::from_vec_trivially(&vec![0; n], ctx);
 
@@ -244,7 +244,7 @@ mod tests {
         // for i in 0..100 {
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
         let begin = Instant::now();
-        let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
+        let sorted_lut = public_key.blind_counting_sort(&lut, &ctx);
         let elapsed = Instant::now() - begin;
         println!("run ({:?})", elapsed);
 

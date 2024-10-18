@@ -1350,6 +1350,7 @@ impl PublicKey {
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
 
+    /* Sample extract in glwe without the redundancy */
     pub fn sample_extract_in_glwe(
         &self,
         glwe: &GlweCiphertext<Vec<u64>>,
@@ -1361,7 +1362,7 @@ impl PublicKey {
             ctx.big_lwe_dimension.to_lwe_size(),
             ctx.ciphertext_modulus,
         );
-        extract_lwe_sample_from_glwe_ciphertext(&glwe, &mut lwe, MonomialDegree(i * ctx.box_size));
+        extract_lwe_sample_from_glwe_ciphertext(&glwe, &mut lwe, MonomialDegree(i));
 
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
@@ -2385,6 +2386,10 @@ mod test {
 
         private_key.debug_glwe("glwe = ", &glwe, &ctx);
         private_key.debug_glwe("result = ", &result, &ctx);
+        assert_eq!(
+            result.as_ref().to_vec(),
+            vec![3_u64; ctx.polynomial_size().0]
+        );
     }
     #[test]
     fn test_absorption_glwe() {
