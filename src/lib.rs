@@ -19,6 +19,12 @@ use rayon::*;
 use tfhe::shortint::parameters::ClassicPBSParameters;
 use tfhe::shortint::prelude::CiphertextModulus;
 
+// Fast Fourier Transform
+use concrete_fft::c64;
+use dyn_stack::{GlobalPodBuffer, PodStack, ReborrowMut};
+use tfhe::core_crypto::entities::FourierPolynomial;
+use tfhe::core_crypto::fft_impl::fft64::math::fft::FftView;
+
 use rand::Rng;
 
 mod blind_sort;
@@ -42,6 +48,67 @@ pub fn key(param: ClassicPBSParameters) -> &'static PrivateKey {
     )
 }
 
+// Polynomial multiplication using FFT
+pub(crate) fn polynomial_fft_wrapping_mul<Scalar, OutputCont, LhsCont, RhsCont>(
+    output: &mut Polynomial<OutputCont>,
+    lhs: &Polynomial<LhsCont>,
+    rhs: &Polynomial<RhsCont>,
+    fft: FftView,
+    stack: &mut PodStack,
+) where
+    Scalar: UnsignedTorus,
+    OutputCont: ContainerMut<Element = Scalar>,
+    LhsCont: Container<Element = Scalar>,
+    RhsCont: Container<Element = Scalar>,
+{
+    assert_eq!(lhs.polynomial_size(), rhs.polynomial_size());
+    let n = lhs.polynomial_size().0;
+
+    let mut fourier_lhs = FourierPolynomial {
+        data: vec![c64::default(); n / 2],
+    };
+    let mut fourier_rhs = FourierPolynomial {
+        data: vec![c64::default(); n / 2],
+    };
+
+    fft.forward_as_torus(
+        unsafe { fourier_lhs.as_mut_view() },
+        lhs.as_view(),
+        stack.rb_mut(),
+    );
+    fft.forward_as_integer(
+        unsafe { fourier_rhs.as_mut_view() },
+        rhs.as_view(),
+        stack.rb_mut(),
+    );
+
+    for (a, b) in fourier_lhs.data.iter_mut().zip(fourier_rhs.data.iter()) {
+        *a *= *b;
+    }
+
+    fft.backward_as_torus(
+        unsafe { output.as_mut_view() },
+        fourier_lhs.as_view(),
+        stack.rb_mut(),
+    );
+}
+
+// FFT initialization
+pub(crate) fn init_fft(polynomial_size: PolynomialSize) -> (Fft, GlobalPodBuffer) {
+    let fft = Fft::new(polynomial_size);
+    let fft_view = fft.as_view();
+
+    let mem = GlobalPodBuffer::new(
+        fft_view
+            .forward_scratch()
+            .unwrap()
+            .and(fft_view.backward_scratch().unwrap()),
+    );
+
+    (fft, mem)
+}
+
+// Context
 pub struct Context {
     parameters: ClassicPBSParameters,
     big_lwe_dimension: LweDimension,
@@ -763,6 +830,33 @@ impl PublicKey {
         return res;
     }
 
+    pub fn glwe_absorption_polynomial_with_fft(
+        &self,
+        glwe: &GlweCiphertext<Vec<u64>>,
+        poly: &Polynomial<Vec<u64>>,
+    ) -> GlweCiphertext<Vec<u64>> {
+        let mut res = GlweCiphertext::new(
+            0_u64,
+            glwe.glwe_size(),
+            glwe.polynomial_size(),
+            glwe.ciphertext_modulus(),
+        );
+
+        let n = glwe.polynomial_size();
+
+        let (fft, mut mem) = init_fft(n);
+        let mut stack = PodStack::new(&mut mem);
+
+        res.as_mut_polynomial_list()
+            .iter_mut()
+            .zip(glwe.as_polynomial_list().iter())
+            .for_each(|(mut dst, lhs)| {
+                polynomial_fft_wrapping_mul(&mut dst, &lhs, poly, fft.as_view(), &mut stack);
+            });
+
+        return res;
+    }
+
     pub fn glwe_sum(
         &self,
         ct1: &GlweCiphertext<Vec<u64>>,
@@ -920,6 +1014,7 @@ impl PublicKey {
         self.blind_array_access(&line, &accumulator_final, ctx)
     }
 
+    // Prototype not working as expected
     pub fn blind_matrix_access_multi_values_opt(
         &self,
         matrix: &Vec<Vec<u64>>,
@@ -983,41 +1078,6 @@ impl PublicKey {
 
         return result;
     }
-
-    /// Get an element of a `matrix` given it `index_line` and it `index_column`
-    // pub fn blind_matrix_access_fully_oblivious(&self, matrix : &Vec<LUT>, index_line : &LweCiphertext<Vec<u64>>, index_column : &LweCiphertext<Vec<u64>>, ctx : &Context)-> LweCiphertext<Vec<u64>>
-    // {
-    //     let mut output = LweCiphertext::new(0u64, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
-
-    //     // multi blind array access
-    //     let mut pbs_results: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
-    //     pbs_results.par_extend(
-    //     matrix
-    //         .into_par_iter()
-    //         .map(|acc| {
-    //             let mut pbs_ct = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
-    //             programmable_bootstrap_lwe_ciphertext(
-    //                 &index_column,
-    //                 &mut pbs_ct,
-    //                 &acc.0,
-    //                 &self.fourier_bsk,
-    //             );
-    //             let mut switched = LweCiphertext::new(0, ctx.small_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
-    //             keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut pbs_ct, &mut switched);
-    //             switched
-    //         }),
-    //     );
-
-    //     let index_line_encoded = self.lwe_ciphertext_plaintext_add(&index_line, ctx.full_message_modulus() as u64, &ctx);
-
-    //     // pack all the lwe
-    //     let accumulator_final = LUT::from_vec_of_lwe_with_padding(pbs_results, self, &ctx);
-    //     // final blind array access
-    //     let mut ct_res = LweCiphertext::new(0u64, ctx.big_lwe_dimension().to_lwe_size(),ctx.ciphertext_modulus());
-    //     programmable_bootstrap_lwe_ciphertext(&index_line_encoded, &mut ct_res, &accumulator_final.0, &self.fourier_bsk,);
-    //     keyswitch_lwe_ciphertext(&self.lwe_ksk, &mut ct_res, &mut output);
-    //     return output
-    // }
 
     /// Insert an `element` in a `lut` at `index` and return the modified lut (très très sensible et pas très robuste...)
     pub fn blind_insertion(
@@ -2412,7 +2472,53 @@ mod test {
         let poly = Polynomial::from_container(container);
 
         /* Absorption */
+        let begin = Instant::now();
         let res = public_key.glwe_absorption_polynomial(&mut glwe, &poly);
+        let elapsed = Instant::now() - begin;
+        println!("absorption ({:?}): ", elapsed);
+
+        /* Decryption */
+        let decrypted_res = private_key.decrypt_and_decode_glwe(&res, &ctx);
+
+        /* Verification */
+        let poly_in_glwe = Polynomial::from_container(vec);
+        let mut expected = Polynomial::new(0_u64, ctx.polynomial_size());
+        polynomial_karatsuba_wrapping_mul(&mut expected, &poly_in_glwe, &poly);
+
+        // reduce the result to the message space as in the decryption process
+        expected
+            .as_mut()
+            .iter_mut()
+            .for_each(|x| *x %= ctx.full_message_modulus() as u64);
+
+        assert_eq!(expected.as_ref().to_vec(), decrypted_res);
+    }
+
+    #[test]
+    fn test_absorption_glwe_with_fft() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        /* Initialization */
+        let vec: Vec<u64> = vec![
+            rand::random::<u64>() % ctx.full_message_modulus() as u64;
+            ctx.polynomial_size().0
+        ];
+        let mut glwe = private_key.allocate_and_encrypt_glwe_from_vec(&vec, &mut ctx);
+
+        /* Create a random polynomial */
+        let container: Vec<u64> = vec![
+            rand::random::<u64>() % ctx.full_message_modulus() as u64;
+            ctx.polynomial_size().0
+        ];
+        let poly = Polynomial::from_container(container);
+
+        /* Absorption */
+        let begin = Instant::now();
+        let res = public_key.glwe_absorption_polynomial_with_fft(&mut glwe, &poly);
+        let elapsed = Instant::now() - begin;
+        println!("absorption ({:?}): ", elapsed);
 
         /* Decryption */
         let decrypted_res = private_key.decrypt_and_decode_glwe(&res, &ctx);
