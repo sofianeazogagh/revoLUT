@@ -33,14 +33,15 @@ pub fn main() {
     let public_key = &private_key.public_key;
     let array = vec![3, 2, 1, 2];
     let lut = LUT::from_vec(&array, &private_key, &mut ctx);
-    let permutation = (0..16)
-        .map(|i| private_key.allocate_and_encrypt_lwe(i, &mut ctx))
-        .collect();
+    // let permutation = (0..16)
+    //     .map(|i| private_key.allocate_and_encrypt_lwe(i, &mut ctx))
+    //     .collect();
 
     let now = std::time::Instant::now();
     // let sorted_lut = public_key.blind_counting_sort(lut, &ctx);
     // let _ = public_key.blind_sort_2bp(lut, &ctx);
-    let _ = public_key.blind_permutation(lut, permutation, &ctx);
+    // let _ = public_key.blind_permutation(lut, permutation, &ctx);
+    let sorted_lut = public_key.blind_counting_sort_modified(&lut, &ctx);
     println!("{:?}", std::time::Instant::now() - now);
 
     // test_blind_tensor_access();

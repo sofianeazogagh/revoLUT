@@ -71,26 +71,14 @@ pub(crate) fn polynomial_fft_wrapping_mul<Scalar, OutputCont, LhsCont, RhsCont>(
         data: vec![c64::default(); n / 2],
     };
 
-    fft.forward_as_torus(
-        unsafe { fourier_lhs.as_mut_view() },
-        lhs.as_view(),
-        stack.rb_mut(),
-    );
-    fft.forward_as_integer(
-        unsafe { fourier_rhs.as_mut_view() },
-        rhs.as_view(),
-        stack.rb_mut(),
-    );
+    fft.forward_as_torus(fourier_lhs.as_mut_view(), lhs.as_view(), stack.rb_mut());
+    fft.forward_as_integer(fourier_rhs.as_mut_view(), rhs.as_view(), stack.rb_mut());
 
     for (a, b) in fourier_lhs.data.iter_mut().zip(fourier_rhs.data.iter()) {
         *a *= *b;
     }
 
-    fft.backward_as_torus(
-        unsafe { output.as_mut_view() },
-        fourier_lhs.as_view(),
-        stack.rb_mut(),
-    );
+    fft.backward_as_torus(output.as_mut_view(), fourier_lhs.as_view(), stack.rb_mut());
 }
 
 // FFT initialization
@@ -228,10 +216,13 @@ impl Context {
     pub fn cbs_base_log(&self) -> DecompositionBaseLog {
         self.parameters.ks_base_log
     }
+    pub fn parameters(&self) -> ClassicPBSParameters {
+        self.parameters
+    }
     // pub fn signed_decomposer(&self) -> SignedDecomposer<u64> {self.signed_decomposer}
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PrivateKey {
     small_lwe_sk: LweSecretKey<Vec<u64>>,
     big_lwe_sk: LweSecretKey<Vec<u64>>,
@@ -589,7 +580,7 @@ impl PrivateKey {
         let mut plaintext_res = PlaintextList::new(0, PlaintextCount(ctx.polynomial_size().0));
         decrypt_glwe_ciphertext(&self.get_glwe_sk(), &input_glwe, &mut plaintext_res);
 
-        // To round our 4 bits of message
+        // To round our bits of message
         let decoded: Vec<_> = plaintext_res
             .iter()
             .map(|x| {
@@ -638,7 +629,7 @@ impl PrivateKey {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PublicKey {
     // utilKey ou ServerKey ou CloudKey
     pub lwe_ksk: LweKeyswitchKey<Vec<u64>>,
@@ -1458,6 +1449,20 @@ impl PublicKey {
         self.glwe_sum_assign(&mut lut.0, &other.0);
     }
 
+    pub fn blind_array_inject_polynomial(
+        &self,
+        lut: &mut LUT,
+        i: usize,
+        x: &LweCiphertext<Vec<u64>>,
+        ctx: &Context,
+    ) {
+        let mut other = LUT::from_lwe(&x, &self, ctx);
+        let index = i * ctx.box_size();
+        // other.public_rotate_left(index, &self);
+        other.public_rotate_right(index, &self);
+        self.glwe_sum_assign(&mut lut.0, &other.0);
+    }
+
     pub fn blind_array_inject_trivial(
         &self,
         lut: &mut LUT,
@@ -1490,6 +1495,8 @@ impl PublicKey {
             let mut z = self.allocate_and_trivially_encrypt_lwe(0u64, ctx);
             lwe_ciphertext_sub(&mut z, &x, &e);
             z = self.run_lut(&z, &iszero, ctx);
+
+            // z = 1 if x == e else 0
 
             // i = f ? j : i
             // i += (z and not f) * j
@@ -1668,13 +1675,19 @@ impl LUT {
         public_key: &PublicKey,
         ctx: &Context,
     ) -> LUT {
+        let number_of_lwe_samples = many_lwe.len();
+        if number_of_lwe_samples > ctx.full_message_modulus() as usize {
+            panic!(
+                "Number of LWE samples are more than the full message modulus, it cannot be packed into one LUT"
+            );
+        }
         let redundant_many_lwe = Self::add_redundancy_many_lwe(many_lwe, &ctx);
         let mut lwe_container: Vec<u64> = Vec::new();
         for ct in redundant_many_lwe {
-            // private_key.debug_lwe("ct", &ct, ctx);
             let mut lwe = ct.into_container();
             lwe_container.append(&mut lwe);
         }
+
         let lwe_ciphertext_list = LweCiphertextList::from_container(
             lwe_container,
             ctx.small_lwe_dimension().to_lwe_size(),
@@ -1856,6 +1869,7 @@ impl LUT {
         println!("{:?}", input_vec);
     }
 
+    // TODO : check if this is correct
     pub fn to_array(&self, private_key: &PrivateKey, ctx: &Context) -> Vec<u64> {
         let mut result_insert: Vec<LweCiphertext<Vec<u64>>> = Vec::new();
         result_insert.par_extend((0..ctx.full_message_modulus()).into_par_iter().map(|i| {
@@ -1891,15 +1905,16 @@ impl LUT {
         result_retrieve_u64
     }
 
-    pub fn public_rotate_right(&mut self, rotation: u64, public_key: &PublicKey) {
-        public_key.glwe_absorption_monic_monomial(&mut self.0, MonomialDegree(rotation as usize));
+    // Rotate the LUT to the right by the given number of boxes
+    pub fn public_rotate_right(&mut self, rotation: usize, public_key: &PublicKey) {
+        public_key.glwe_absorption_monic_monomial(&mut self.0, MonomialDegree(rotation));
     }
 
-    pub fn public_rotate_left(&mut self, rotation: usize, public_key: &PublicKey, ctx: &Context) {
-        public_key.glwe_absorption_monic_monomial(
-            &mut self.0,
-            MonomialDegree(2 * ctx.polynomial_size().0 - rotation),
-        );
+    /// Rotate the LUT to the left by the given number of boxes (emulate a blind rotation with a trivial lwe)
+    pub fn public_rotate_left(&mut self, rotation: usize, public_key: &PublicKey) {
+        let poly_size = self.0.polynomial_size().0;
+        public_key
+            .glwe_absorption_monic_monomial(&mut self.0, MonomialDegree(2 * poly_size - rotation));
     }
 
     /// re-packs a fresh LUT from its sample extracts
@@ -2050,7 +2065,7 @@ mod test {
 
     use itertools::Itertools;
     use quickcheck::TestResult;
-    use tfhe::shortint::parameters::*;
+    use tfhe::{boolean::public_key, shortint::parameters::*};
 
     use super::*;
 
@@ -2655,4 +2670,164 @@ mod test {
     }
     // println!("avg time: {:?}", total / runs);
     // }
+    #[test]
+    fn test_mul_polynomial_with_fft() {
+        let ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+
+        let fft = Fft::new(ctx.polynomial_size());
+        let fft = fft.as_view();
+
+        let n = ctx.polynomial_size().0;
+
+        let mut mem = GlobalPodBuffer::new(
+            fft.forward_scratch()
+                .unwrap()
+                .and(fft.backward_scratch().unwrap()),
+        );
+
+        let mut stack = PodStack::new(&mut mem);
+
+        let input1 = Polynomial::from_container({
+            (0..n)
+                .map(|_| rand::random::<u16>() as u64)
+                .collect::<Vec<_>>()
+        });
+        let input2 = Polynomial::from_container({
+            (0..n)
+                .map(|_| rand::random::<u16>() as u64)
+                .collect::<Vec<_>>()
+        });
+
+        let mut actual = Polynomial::new(0u64, PolynomialSize(n));
+        //time here
+        let start = Instant::now();
+        polynomial_fft_wrapping_mul(&mut actual, &input1, &input2, fft, &mut stack);
+        let end = Instant::now();
+        println!("Time taken fft: {:?}", end.duration_since(start));
+
+        let mut expected = Polynomial::new(0u64, PolynomialSize(n));
+        let start = Instant::now();
+        polynomial_karatsuba_wrapping_mul(&mut expected, &input1, &input2);
+        let end = Instant::now();
+        println!("Time taken karatsuba: {:?}", end.duration_since(start));
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_blind_array_inject_polynomial() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
+        let public_key = &private_key.public_key;
+
+        // Initialiser une LUT avec des valeurs connues
+        let initial_values = vec![0, 0, 0, 0];
+        let mut lut = LUT::from_vec(&initial_values, &private_key, &mut ctx);
+
+        private_key.debug_glwe("lut initial = ", &lut.0, &ctx);
+
+        // Chiffrer une valeur à injecter
+        let value_to_inject = 1;
+        let lwe_value = private_key.allocate_and_encrypt_lwe(value_to_inject, &mut ctx);
+
+        // Indice où injecter la valeur
+        let index_to_inject = 3;
+
+        // Appeler la fonction à tester
+        let start = Instant::now();
+        public_key.blind_array_inject_polynomial(&mut lut, index_to_inject, &lwe_value, &ctx);
+        let end = Instant::now();
+        println!(
+            "Time taken blind array inject polynomial: {:?}",
+            end.duration_since(start)
+        );
+
+        // Déchiffrer la LUT pour vérifier l'injection
+        let decrypted_values: Vec<u64> = (0..ctx.full_message_modulus())
+            .map(|i| {
+                let lwe = public_key.sample_extract(&lut, i, &ctx);
+                private_key.decrypt_lwe(&lwe, &ctx)
+            })
+            .collect();
+
+        // Vérifier que la valeur a été correctement injectée
+        assert_eq!(decrypted_values[index_to_inject as usize], value_to_inject);
+        // Vérifier que les autres valeurs n'ont pas été modifiées
+        for (i, &value) in decrypted_values.iter().enumerate() {
+            if i != index_to_inject as usize {
+                assert_eq!(value, initial_values[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_compare_blind_and_public_rotation() {
+        let mut ctx = Context::from(PARAM_MESSAGE_6_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let mut lut_1 = LUT::from_vec(&vec![0, 1, 2, 3], &private_key, &mut ctx);
+        let index = public_key.allocate_and_trivially_encrypt_lwe(3, &mut ctx);
+
+        let index_lwe = private_key.allocate_and_encrypt_lwe(3, &mut ctx);
+        let start = Instant::now();
+        blind_rotate_assign(&index_lwe, &mut lut_1.0, &public_key.fourier_bsk);
+        let end = Instant::now();
+        println!(
+            "Time taken for blind rotation with encrypted index: {:?}",
+            end.duration_since(start)
+        );
+        private_key.debug_glwe("lut after blind rotation = ", &lut_1.0, &ctx);
+
+        let mut lut_2 = LUT::from_vec(&vec![0, 1, 2, 3], &private_key, &mut ctx);
+        let index = 3 * ctx.box_size();
+        let start = Instant::now();
+        lut_2.public_rotate_left(index, public_key);
+        let end = Instant::now();
+        println!(
+            "Time taken for public rotation with trivial index: {:?}",
+            end.duration_since(start)
+        );
+        private_key.debug_glwe("lut after public rotation = ", &lut_2.0, &ctx);
+
+        // conclusion : public rotation is ~200 times faster than blind rotations
+    }
+
+    #[test]
+    fn test_compare_poly_mul_fft_and_monomial() {
+        let ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+
+        let n = ctx.polynomial_size().0 as u64;
+        let poly1 = Polynomial::from_container((0..n).collect::<Vec<u64>>());
+        let index = 1;
+        let monomial = Polynomial::from_container(
+            (0..n)
+                .map(|x| if x == index { 1 } else { 0 })
+                .collect::<Vec<u64>>(),
+        );
+
+        let (fft, mut mem) = init_fft(ctx.polynomial_size());
+        let fft = fft.as_view();
+        let mut stack = PodStack::new(&mut mem);
+
+        let mut actual_fft = Polynomial::new(0u64, ctx.polynomial_size());
+        let start = Instant::now();
+        polynomial_fft_wrapping_mul(&mut actual_fft, &poly1, &monomial, fft, &mut stack);
+        let end = Instant::now();
+        println!("Time taken fft: {:?}", end.duration_since(start));
+
+        let mut actual_monomial = Polynomial::new(0u64, ctx.polynomial_size());
+        let start = Instant::now();
+        polynomial_wrapping_monic_monomial_mul(
+            &mut actual_monomial,
+            &poly1,
+            MonomialDegree(index as usize),
+        );
+        let end = Instant::now();
+        println!("Time taken monomial: {:?}", end.duration_since(start));
+
+        // conclusion : monomial is ~two times faster than fft
+        // TODO : check if this is correct
+        assert_eq!(actual_fft, actual_monomial);
+    }
 }
