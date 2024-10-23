@@ -25,3 +25,7 @@ src/one_hot_slot.rs
 
 PrivateKey*
 flamegraph.svg
+
+*.key
+*.pdf
+*.png

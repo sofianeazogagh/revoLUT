@@ -1449,7 +1449,7 @@ impl PublicKey {
         self.glwe_sum_assign(&mut lut.0, &other.0);
     }
 
-    pub fn blind_array_inject_polynomial(
+    pub fn blind_array_inject_clear_index(
         &self,
         lut: &mut LUT,
         i: usize,
@@ -1458,12 +1458,11 @@ impl PublicKey {
     ) {
         let mut other = LUT::from_lwe(&x, &self, ctx);
         let index = i * ctx.box_size();
-        // other.public_rotate_left(index, &self);
         other.public_rotate_right(index, &self);
         self.glwe_sum_assign(&mut lut.0, &other.0);
     }
 
-    pub fn blind_array_inject_trivial(
+    pub fn blind_array_inject_trivial_lut(
         &self,
         lut: &mut LUT,
         i: &LweCiphertext<Vec<u64>>,
@@ -2065,7 +2064,7 @@ mod test {
 
     use itertools::Itertools;
     use quickcheck::TestResult;
-    use tfhe::{boolean::public_key, shortint::parameters::*};
+    use tfhe::shortint::parameters::*;
 
     use super::*;
 
@@ -2177,12 +2176,15 @@ mod test {
     #[test]
     fn test_lut_from_lwe() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
         for i in 0u64..16u64 {
             let lwe = private_key.allocate_and_encrypt_lwe(i, &mut ctx);
+            let start = Instant::now();
             let lut = LUT::from_lwe(&lwe, public_key, &ctx);
+            let elapsed = Instant::now() - start;
+            println!("Time taken to create LUT: {:?}", elapsed);
             for j in 0..16u64 {
                 let output = public_key.sample_extract(&lut, j as usize, &ctx);
                 let actual = private_key.decrypt_lwe(&output, &ctx);
@@ -2459,12 +2461,9 @@ mod test {
 
         let result = public_key.glwe_sum_polynomial(&glwe, &poly, &ctx);
 
-        private_key.debug_glwe("glwe = ", &glwe, &ctx);
-        private_key.debug_glwe("result = ", &result, &ctx);
-        assert_eq!(
-            result.as_ref().to_vec(),
-            vec![3_u64; ctx.polynomial_size().0]
-        );
+        let actual = private_key.decrypt_and_decode_glwe(&result, &ctx);
+        let expected = vec![3_u64; ctx.polynomial_size().0];
+        assert_eq!(actual, expected);
     }
     #[test]
     fn test_absorption_glwe() {
@@ -2724,8 +2723,6 @@ mod test {
         let initial_values = vec![0, 0, 0, 0];
         let mut lut = LUT::from_vec(&initial_values, &private_key, &mut ctx);
 
-        private_key.debug_glwe("lut initial = ", &lut.0, &ctx);
-
         // Chiffrer une valeur à injecter
         let value_to_inject = 1;
         let lwe_value = private_key.allocate_and_encrypt_lwe(value_to_inject, &mut ctx);
@@ -2734,13 +2731,7 @@ mod test {
         let index_to_inject = 3;
 
         // Appeler la fonction à tester
-        let start = Instant::now();
-        public_key.blind_array_inject_polynomial(&mut lut, index_to_inject, &lwe_value, &ctx);
-        let end = Instant::now();
-        println!(
-            "Time taken blind array inject polynomial: {:?}",
-            end.duration_since(start)
-        );
+        public_key.blind_array_inject_clear_index(&mut lut, index_to_inject, &lwe_value, &ctx);
 
         // Déchiffrer la LUT pour vérifier l'injection
         let decrypted_values: Vec<u64> = (0..ctx.full_message_modulus())
@@ -2767,8 +2758,6 @@ mod test {
         let public_key = &private_key.public_key;
 
         let mut lut_1 = LUT::from_vec(&vec![0, 1, 2, 3], &private_key, &mut ctx);
-        let index = public_key.allocate_and_trivially_encrypt_lwe(3, &mut ctx);
-
         let index_lwe = private_key.allocate_and_encrypt_lwe(3, &mut ctx);
         let start = Instant::now();
         blind_rotate_assign(&index_lwe, &mut lut_1.0, &public_key.fourier_bsk);
