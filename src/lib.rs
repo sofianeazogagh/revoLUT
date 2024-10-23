@@ -1449,20 +1449,6 @@ impl PublicKey {
         self.glwe_sum_assign(&mut lut.0, &other.0);
     }
 
-    pub fn blind_array_inject_polynomial(
-        &self,
-        lut: &mut LUT,
-        i: usize,
-        x: &LweCiphertext<Vec<u64>>,
-        ctx: &Context,
-    ) {
-        let mut other = LUT::from_lwe(&x, &self, ctx);
-        let index = i * ctx.box_size();
-        // other.public_rotate_left(index, &self);
-        other.public_rotate_right(index, &self);
-        self.glwe_sum_assign(&mut lut.0, &other.0);
-    }
-
     pub fn blind_array_inject_trivial(
         &self,
         lut: &mut LUT,
@@ -2065,7 +2051,7 @@ mod test {
 
     use itertools::Itertools;
     use quickcheck::TestResult;
-    use tfhe::{boolean::public_key, shortint::parameters::*};
+    use tfhe::shortint::parameters::*;
 
     use super::*;
 
@@ -2715,61 +2701,15 @@ mod test {
     }
 
     #[test]
-    fn test_blind_array_inject_polynomial() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
-        let public_key = &private_key.public_key;
-
-        // Initialiser une LUT avec des valeurs connues
-        let initial_values = vec![0, 0, 0, 0];
-        let mut lut = LUT::from_vec(&initial_values, &private_key, &mut ctx);
-
-        private_key.debug_glwe("lut initial = ", &lut.0, &ctx);
-
-        // Chiffrer une valeur à injecter
-        let value_to_inject = 1;
-        let lwe_value = private_key.allocate_and_encrypt_lwe(value_to_inject, &mut ctx);
-
-        // Indice où injecter la valeur
-        let index_to_inject = 3;
-
-        // Appeler la fonction à tester
-        let start = Instant::now();
-        public_key.blind_array_inject_polynomial(&mut lut, index_to_inject, &lwe_value, &ctx);
-        let end = Instant::now();
-        println!(
-            "Time taken blind array inject polynomial: {:?}",
-            end.duration_since(start)
-        );
-
-        // Déchiffrer la LUT pour vérifier l'injection
-        let decrypted_values: Vec<u64> = (0..ctx.full_message_modulus())
-            .map(|i| {
-                let lwe = public_key.sample_extract(&lut, i, &ctx);
-                private_key.decrypt_lwe(&lwe, &ctx)
-            })
-            .collect();
-
-        // Vérifier que la valeur a été correctement injectée
-        assert_eq!(decrypted_values[index_to_inject as usize], value_to_inject);
-        // Vérifier que les autres valeurs n'ont pas été modifiées
-        for (i, &value) in decrypted_values.iter().enumerate() {
-            if i != index_to_inject as usize {
-                assert_eq!(value, initial_values[i]);
-            }
-        }
-    }
-
-    #[test]
     fn test_compare_blind_and_public_rotation() {
         let mut ctx = Context::from(PARAM_MESSAGE_6_CARRY_0);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
         let mut lut_1 = LUT::from_vec(&vec![0, 1, 2, 3], &private_key, &mut ctx);
-        let index = public_key.allocate_and_trivially_encrypt_lwe(3, &mut ctx);
+        let index_lwe = public_key.allocate_and_trivially_encrypt_lwe(3, &mut ctx);
 
-        let index_lwe = private_key.allocate_and_encrypt_lwe(3, &mut ctx);
+        // let index_lwe = private_key.allocate_and_encrypt_lwe(3, &mut ctx);
         let start = Instant::now();
         blind_rotate_assign(&index_lwe, &mut lut_1.0, &public_key.fourier_bsk);
         let end = Instant::now();
@@ -2829,5 +2769,29 @@ mod test {
         // conclusion : monomial is ~two times faster than fft
         // TODO : check if this is correct
         assert_eq!(actual_fft, actual_monomial);
+    }
+
+    #[test]
+    fn test_blind_rotation_assign() {
+        let param = PARAM_MESSAGE_3_CARRY_0;
+        let mut ctx = Context::from(param);
+        let private_key = key(param);
+        let public_key = &private_key.public_key;
+        let array = vec![1, 0, 0, 0, 0, 0, 0, 0];
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+
+        let input = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
+        let input = public_key.neg_lwe(&input, &ctx);
+        println!("{}", private_key.decrypt_lwe(&input, &ctx));
+        let mut target = lut.clone();
+        blind_rotate_assign(&input, &mut target.0, &public_key.fourier_bsk);
+        private_key.debug_glwe("rotated lut", &target.0, &ctx);
+
+        let input = private_key.allocate_and_encrypt_lwe(2, &mut ctx);
+        let input = public_key.neg_lwe(&input, &ctx);
+        let mut target = lut.clone();
+        blind_rotate_assign(&input, &mut target.0, &public_key.fourier_bsk);
+        println!("{}", private_key.decrypt_lwe(&input, &ctx));
+        private_key.debug_glwe("rotated lut", &target.0, &ctx);
     }
 }
