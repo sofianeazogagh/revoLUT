@@ -81,6 +81,8 @@ impl crate::PublicKey {
         let identity = LUT::from_function(|x| x, ctx);
         let isnull = LUT::from_function(|x| if x == 0 { 1 } else { 0 }, ctx);
         let mut permutation = vec![];
+
+        // let expected_cpt = vec![1, 2, 2, 2, 3, 3, 4, 4, 5, 6, 7, 8, 9, 10, 11, 12]; // to track the noise
         for i in 0..n {
             let mut current = self.sample_extract(&lut, i, ctx);
             let b = self.run_lut(&current, &isnull, &ctx);

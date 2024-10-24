@@ -592,6 +592,21 @@ impl PrivateKey {
         println!("{} {:?}", string, decoded);
     }
 
+    pub fn lwe_noise(
+        &self,
+        ct: &LweCiphertext<Vec<u64>>,
+        expected_plaintext: u64,
+        ctx: &Context,
+    ) -> f64 {
+        // plaintext = b - a*s = Delta*m + e
+        let mut plaintext = decrypt_lwe_ciphertext(&self.small_lwe_sk, &ct);
+
+        // plaintext = plaintext - Delta*m = e
+        plaintext.0 = plaintext.0.wrapping_sub(ctx.delta() * expected_plaintext);
+
+        ((plaintext.0 as i64).abs() as f64).log2()
+    }
+
     pub fn encrypt_matrix(&self, mut ctx: &mut Context, matrix: &Vec<Vec<u64>>) -> Vec<LUT> {
         let mut ct_matrix: Vec<LUT> = Vec::new();
         for line in matrix {
@@ -1005,7 +1020,7 @@ impl PublicKey {
         self.blind_array_access(&line, &accumulator_final, ctx)
     }
 
-    // Prototype not working as expected
+    // Prototype not working as expected (the result is 2 times the expected result)
     pub fn blind_matrix_access_multi_values_opt(
         &self,
         matrix: &Vec<Vec<u64>>,
