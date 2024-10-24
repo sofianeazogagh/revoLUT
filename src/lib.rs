@@ -592,6 +592,21 @@ impl PrivateKey {
         println!("{} {:?}", string, decoded);
     }
 
+    pub fn lwe_noise(
+        &self,
+        ct: &LweCiphertext<Vec<u64>>,
+        expected_plaintext: u64,
+        ctx: &Context,
+    ) -> f64 {
+        // plaintext = b - a*s = Delta*m + e
+        let mut plaintext = decrypt_lwe_ciphertext(&self.small_lwe_sk, &ct);
+
+        // plaintext = plaintext - Delta*m = e
+        plaintext.0 = plaintext.0.wrapping_sub(ctx.delta() * expected_plaintext);
+
+        ((plaintext.0 as i64).abs() as f64).log2()
+    }
+
     pub fn encrypt_matrix(&self, mut ctx: &mut Context, matrix: &Vec<Vec<u64>>) -> Vec<LUT> {
         let mut ct_matrix: Vec<LUT> = Vec::new();
         for line in matrix {
@@ -1005,7 +1020,7 @@ impl PublicKey {
         self.blind_array_access(&line, &accumulator_final, ctx)
     }
 
-    // Prototype not working as expected
+    // Prototype not working as expected (the result is 2 times the expected result)
     pub fn blind_matrix_access_multi_values_opt(
         &self,
         matrix: &Vec<Vec<u64>>,
@@ -1449,7 +1464,20 @@ impl PublicKey {
         self.glwe_sum_assign(&mut lut.0, &other.0);
     }
 
-    pub fn blind_array_inject_trivial(
+    pub fn blind_array_inject_clear_index(
+        &self,
+        lut: &mut LUT,
+        i: usize,
+        x: &LweCiphertext<Vec<u64>>,
+        ctx: &Context,
+    ) {
+        let mut other = LUT::from_lwe(&x, &self, ctx);
+        let index = i * ctx.box_size();
+        other.public_rotate_right(index, &self);
+        self.glwe_sum_assign(&mut lut.0, &other.0);
+    }
+
+    pub fn blind_array_inject_trivial_lut(
         &self,
         lut: &mut LUT,
         i: &LweCiphertext<Vec<u64>>,
@@ -2163,12 +2191,15 @@ mod test {
     #[test]
     fn test_lut_from_lwe() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
         for i in 0u64..16u64 {
             let lwe = private_key.allocate_and_encrypt_lwe(i, &mut ctx);
+            let start = Instant::now();
             let lut = LUT::from_lwe(&lwe, public_key, &ctx);
+            let elapsed = Instant::now() - start;
+            println!("Time taken to create LUT: {:?}", elapsed);
             for j in 0..16u64 {
                 let output = public_key.sample_extract(&lut, j as usize, &ctx);
                 let actual = private_key.decrypt_lwe(&output, &ctx);
@@ -2445,12 +2476,9 @@ mod test {
 
         let result = public_key.glwe_sum_polynomial(&glwe, &poly, &ctx);
 
-        private_key.debug_glwe("glwe = ", &glwe, &ctx);
-        private_key.debug_glwe("result = ", &result, &ctx);
-        assert_eq!(
-            result.as_ref().to_vec(),
-            vec![3_u64; ctx.polynomial_size().0]
-        );
+        let actual = private_key.decrypt_and_decode_glwe(&result, &ctx);
+        let expected = vec![3_u64; ctx.polynomial_size().0];
+        assert_eq!(actual, expected);
     }
     #[test]
     fn test_absorption_glwe() {
@@ -2701,15 +2729,51 @@ mod test {
     }
 
     #[test]
+    fn test_blind_array_inject_polynomial() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
+        let public_key = &private_key.public_key;
+
+        // Initialiser une LUT avec des valeurs connues
+        let initial_values = vec![0, 0, 0, 0];
+        let mut lut = LUT::from_vec(&initial_values, &private_key, &mut ctx);
+
+        // Chiffrer une valeur à injecter
+        let value_to_inject = 1;
+        let lwe_value = private_key.allocate_and_encrypt_lwe(value_to_inject, &mut ctx);
+
+        // Indice où injecter la valeur
+        let index_to_inject = 3;
+
+        // Appeler la fonction à tester
+        public_key.blind_array_inject_clear_index(&mut lut, index_to_inject, &lwe_value, &ctx);
+
+        // Déchiffrer la LUT pour vérifier l'injection
+        let decrypted_values: Vec<u64> = (0..ctx.full_message_modulus())
+            .map(|i| {
+                let lwe = public_key.sample_extract(&lut, i, &ctx);
+                private_key.decrypt_lwe(&lwe, &ctx)
+            })
+            .collect();
+
+        // Vérifier que la valeur a été correctement injectée
+        assert_eq!(decrypted_values[index_to_inject as usize], value_to_inject);
+        // Vérifier que les autres valeurs n'ont pas été modifiées
+        for (i, &value) in decrypted_values.iter().enumerate() {
+            if i != index_to_inject as usize {
+                assert_eq!(value, initial_values[i]);
+            }
+        }
+    }
+
+    #[test]
     fn test_compare_blind_and_public_rotation() {
         let mut ctx = Context::from(PARAM_MESSAGE_6_CARRY_0);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
         let mut lut_1 = LUT::from_vec(&vec![0, 1, 2, 3], &private_key, &mut ctx);
-        let index_lwe = public_key.allocate_and_trivially_encrypt_lwe(3, &mut ctx);
-
-        // let index_lwe = private_key.allocate_and_encrypt_lwe(3, &mut ctx);
+        let index_lwe = private_key.allocate_and_encrypt_lwe(3, &mut ctx);
         let start = Instant::now();
         blind_rotate_assign(&index_lwe, &mut lut_1.0, &public_key.fourier_bsk);
         let end = Instant::now();
