@@ -28,6 +28,7 @@ impl crate::PublicKey {
     pub fn blind_sort_bma(&self, lut: LUT, ctx: &Context) -> LUT {
         let n = ctx.full_message_modulus;
         let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let identity = LUT::from_function(|x| x, ctx);
         let mut permutation = vec![zero; n];
         let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
         for col in 0..n {
@@ -38,6 +39,8 @@ impl crate::PublicKey {
                 lwe_ciphertext_add_assign(&mut permutation[lin], &res);
                 lwe_ciphertext_add_assign(&mut permutation[col], &one);
                 lwe_ciphertext_sub_assign(&mut permutation[col], &res);
+                self.blind_array_access(&permutation[col], &identity, ctx);
+                self.blind_array_access(&permutation[lin], &identity, ctx);
             }
         }
 
