@@ -1535,6 +1535,12 @@ impl PublicKey {
 
 pub struct LUT(pub GlweCiphertext<Vec<u64>>);
 
+impl Clone for LUT {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
 impl LUT {
     pub fn new(ctx: &Context) -> LUT {
         let new_lut = GlweCiphertext::new(
