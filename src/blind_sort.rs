@@ -1,42 +1,9 @@
-use std::sync::OnceLock;
-
-use tfhe::{
-    core_crypto::{
-        algorithms::{lwe_ciphertext_add_assign, lwe_ciphertext_sub_assign},
-        entities::LweCiphertext,
-    },
-    shortint::parameters::*,
+use tfhe::core_crypto::{
+    algorithms::{lwe_ciphertext_add_assign, lwe_ciphertext_sub, lwe_ciphertext_sub_assign},
+    entities::LweCiphertext,
 };
 
 use crate::{Context, LUT};
-
-/// lazily compute a trivially encrypted boolean comparison matrix of the form:
-/// ```text
-/// 0 0 0
-/// 1 0 0
-/// 1 1 0
-/// ```
-fn cmp_matrix(bitsize: usize) -> &'static Vec<LUT> {
-    let params = [
-        PARAM_MESSAGE_1_CARRY_0,
-        PARAM_MESSAGE_2_CARRY_0,
-        PARAM_MESSAGE_3_CARRY_0,
-        PARAM_MESSAGE_4_CARRY_0,
-        PARAM_MESSAGE_5_CARRY_0,
-    ];
-    static MATRICES: OnceLock<Vec<Vec<LUT>>> = OnceLock::new();
-    &MATRICES.get_or_init(|| {
-        Vec::from_iter((1..=5).map(|b| {
-            let n = 1 << b;
-            Vec::from_iter((0..n).map(|i| {
-                LUT::from_vec_trivially(
-                    &Vec::from_iter((0..n).map(|j| if j < i { 1 } else { 0 })),
-                    &Context::from(params[b - 1]),
-                )
-            }))
-        }))
-    })[bitsize - 1]
-}
 
 impl crate::PublicKey {
     /// compares a and b blindly, returning a cipher of 1 if a < b else 0
@@ -46,14 +13,22 @@ impl crate::PublicKey {
         b: &LweCiphertext<Vec<u64>>,
         ctx: &Context,
     ) -> LweCiphertext<Vec<u64>> {
-        let bitsize = ctx.full_message_modulus().ilog2() as usize;
-        self.blind_matrix_access(cmp_matrix(bitsize), b, a, ctx)
+        let n = ctx.full_message_modulus();
+        let mut container = vec![0; n / 2];
+        container.extend(vec![2 * n as u64 - 1; n / 2]);
+        let lut = LUT::from_vec_trivially(&container, ctx);
+        let mut output = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        lwe_ciphertext_sub(&mut output, &a, &b);
+        let res = self.blind_array_access(&output, &lut, ctx);
+        res
     }
 
-    /// Direct Sort of distinct values
+    /// Direct Sort of values
+    /// given param n bits, assume inputs are n-1 bits
     pub fn blind_sort_bma(&self, lut: LUT, ctx: &Context) -> LUT {
         let n = ctx.full_message_modulus;
         let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let identity = LUT::from_function(|x| x, ctx);
         let mut permutation = vec![zero; n];
         let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
         for col in 0..n {
@@ -64,6 +39,8 @@ impl crate::PublicKey {
                 lwe_ciphertext_add_assign(&mut permutation[lin], &res);
                 lwe_ciphertext_add_assign(&mut permutation[col], &one);
                 lwe_ciphertext_sub_assign(&mut permutation[col], &res);
+                self.blind_array_access(&permutation[col], &identity, ctx);
+                self.blind_array_access(&permutation[lin], &identity, ctx);
             }
         }
 
@@ -109,31 +86,54 @@ impl crate::PublicKey {
     }
 
     pub fn blind_counting_sort(&self, lut: &LUT, ctx: &Context) -> LUT {
+        self.blind_counting_sort_k(lut, ctx, ctx.full_message_modulus())
+    }
+
+    pub fn blind_counting_sort_k(&self, lut: &LUT, ctx: &Context, k: usize) -> LUT {
+        self.many_blind_counting_sort_k(&vec![lut], ctx, k)
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    pub fn many_blind_counting_sort_k(
+        &self,
+        luts: &Vec<&LUT>,
+        ctx: &Context,
+        k: usize,
+    ) -> Vec<LUT> {
         let n = ctx.full_message_modulus;
+        let m = luts.len();
         let mut count = LUT::from_vec_trivially(&vec![0; n], ctx);
+        let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
+        let minus_one = self.allocate_and_trivially_encrypt_lwe(2 * n as u64 - 1, ctx);
 
         // step 1: count values
-        for i in 0..n {
-            let j = self.sample_extract(&lut, i, ctx);
-            self.blind_array_inject_trivial_lut(&mut count, &j, 1, ctx);
+        for i in 0..k {
+            let j = self.sample_extract(&luts[0], i, ctx);
+            self.blind_array_inject(&mut count, &j, &one, ctx);
         }
 
         // step 2: build prefix sum
         for i in 1..n {
             let c = self.sample_extract(&count, i - 1, ctx);
-            self.blind_array_inject_clear_index(&mut count, i, &c, ctx);
+            let j = self.allocate_and_trivially_encrypt_lwe(i as u64, ctx);
+            self.blind_array_inject(&mut count, &j, &c, ctx);
         }
 
         // step 3: rebuild sorted list
-        let mut result = LUT::from_vec_trivially(&vec![0; n], ctx);
-        for i in (0..n).rev() {
-            let j = self.sample_extract(&lut, i, ctx);
-            self.blind_array_inject_trivial_lut(&mut count, &j, 2 * n as u64 - 1, ctx);
-            let c = self.blind_array_access(&j, &count, ctx);
-            self.blind_array_inject(&mut result, &c, &j, ctx);
+        let mut results = vec![LUT::from_vec_trivially(&vec![0; n], ctx); m];
+        for i in (0..k).rev() {
+            let e = self.sample_extract(&luts[0], i, ctx);
+            self.blind_array_inject(&mut count, &e, &minus_one, ctx);
+            let c = self.blind_array_access(&e, &count, ctx);
+            for j in 0..m {
+                let e = self.sample_extract(&luts[j], i, ctx);
+                self.blind_array_inject(&mut results[j], &c, &e, ctx);
+            }
         }
 
-        result
+        results
     }
 }
 
@@ -147,19 +147,20 @@ mod tests {
 
     #[test]
     fn test_blind_lt() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let n = ctx.full_message_modulus();
         let public_key = &private_key.public_key;
 
-        for a in 0..ctx.message_modulus().0 {
+        for a in 0..n / 2 {
             let c_a = private_key.allocate_and_encrypt_lwe(a as u64, &mut ctx);
-            for b in 0..ctx.message_modulus().0 {
+            for b in 0..n / 2 {
                 let c_b = private_key.allocate_and_encrypt_lwe(b as u64, &mut ctx);
-                // let begin = Instant::now();
+                let begin = Instant::now();
                 let c_res = public_key.blind_lt(&c_a, &c_b, &ctx);
-                // let elapsed = Instant::now() - begin;
+                let elapsed = Instant::now() - begin;
                 let res = private_key.decrypt_lwe(&c_res, &ctx);
-                // println!("{} < {} is {} ({}) ({:?})", a, b, res, res == 1, elapsed);
+                println!("{} < {} is {} ({}) ({:?})", a, b, res, res == 1, elapsed);
 
                 assert!(res == if a < b { 1 } else { 0 });
             }
@@ -168,8 +169,11 @@ mod tests {
 
     #[test]
     fn test_blind_sort_bma() {
-        let params = [PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_3_CARRY_0];
-        let arrays = [vec![1, 2, 1, 0], vec![1, 3, 2, 4, 4, 7, 6, 5]];
+        let params = [PARAM_MESSAGE_3_CARRY_0, PARAM_MESSAGE_4_CARRY_0];
+        let arrays = [
+            vec![1, 2, 1, 0, 2, 1, 2, 3],
+            vec![1, 3, 2, 4, 4, 7, 6, 5, 6, 6, 6, 6, 6, 6, 6, 6],
+        ];
         for (&param, array) in params.iter().zip(arrays) {
             let mut ctx = Context::from(param);
             let private_key = key(ctx.parameters);
@@ -258,6 +262,37 @@ mod tests {
         // }
     }
 
+    #[test]
+    fn test_many_blind_counting_sort() {
+        let param = PARAM_MESSAGE_3_CARRY_0;
+        let mut ctx = Context::from(param);
+        let private_key = key(param);
+        let public_key = &private_key.public_key;
+        let array1 = vec![2, 1, 3, 1, 0, 0, 0, 0];
+        let array2 = vec![0, 1, 2, 3, 4, 5, 6, 7];
+
+        // for i in 0..100 {
+        let lut1 = LUT::from_vec(&array1, &private_key, &mut ctx);
+        let lut2 = LUT::from_vec(&array2, &private_key, &mut ctx);
+        let luts = vec![&lut1, &lut2];
+        let begin = Instant::now();
+        let sorted_luts =
+            public_key.many_blind_counting_sort_k(&luts, &ctx, ctx.full_message_modulus());
+        let elapsed = Instant::now() - begin;
+        println!("run ({:?})", elapsed);
+
+        let expected_array1 = vec![0, 0, 0, 0, 1, 1, 2, 3];
+        let expected_array2 = vec![4, 5, 6, 7, 1, 3, 0, 2];
+        for i in 0..array1.len() {
+            let lwe = public_key.sample_extract(&sorted_luts[0], i, &ctx);
+            let actual = private_key.decrypt_lwe(&lwe, &ctx);
+            assert_eq!(actual, expected_array1[i]);
+            let lwe = public_key.sample_extract(&sorted_luts[1], i, &ctx);
+            let actual = private_key.decrypt_lwe(&lwe, &ctx);
+            assert_eq!(actual, expected_array2[i]);
+        }
+        // }
+    }
     #[test]
     fn test_blind_rotation_assign() {
         let param = PARAM_MESSAGE_6_CARRY_0;
