@@ -11,9 +11,10 @@ use tfhe::shortint::parameters::*;
 
 use std::time::{Duration, Instant};
 
-const PRINT_HEADERS_IN_CSV: bool = false;
-const PRINT_BENCHMARK: bool = false;
-const PRINT_CSV: bool = false;
+const PRINT_HEADERS_IN_CSV: bool = true;
+const PRINT_CSV: bool = true;
+
+const PRINT_BENCHMARK: bool = true;
 
 // Fonction générique pour exécuter et mesurer la performance
 pub fn benchmark<F>(
@@ -52,25 +53,24 @@ pub fn benchmark<F>(
 }
 
 #[allow(dead_code)]
-pub fn test_primitives() {
-    // Ouvre le fichier en mode append pour ne pas écraser les données existantes
+pub fn test_primitives(primitive_name: Option<&str>, path: &str) {
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("./exports/benchmark_results.csv")
+        .open(path)
         .expect("Impossible to open the file");
 
     if PRINT_HEADERS_IN_CSV {
-        writeln!(&mut file, "Primitive,Variants,Parameters,Time (ms)")
+        writeln!(file, "Primitive,Variants,Parameters,Time (ms)")
             .expect("Error while writing in the file");
     }
 
     let params = vec![
-        // ("PARAM_MESSAGE_2_CARRY_0", PARAM_MESSAGE_2_CARRY_0),
-        // ("PARAM_MESSAGE_3_CARRY_0", PARAM_MESSAGE_3_CARRY_0),
-        // ("PARAM_MESSAGE_4_CARRY_0", PARAM_MESSAGE_4_CARRY_0),
-        // ("PARAM_MESSAGE_5_CARRY_0", PARAM_MESSAGE_5_CARRY_0),
-        // ("PARAM_MESSAGE_6_CARRY_0", PARAM_MESSAGE_6_CARRY_0),
+        ("PARAM_MESSAGE_2_CARRY_0", PARAM_MESSAGE_2_CARRY_0),
+        ("PARAM_MESSAGE_3_CARRY_0", PARAM_MESSAGE_3_CARRY_0),
+        ("PARAM_MESSAGE_4_CARRY_0", PARAM_MESSAGE_4_CARRY_0),
+        ("PARAM_MESSAGE_5_CARRY_0", PARAM_MESSAGE_5_CARRY_0),
+        ("PARAM_MESSAGE_6_CARRY_0", PARAM_MESSAGE_6_CARRY_0),
         ("PARAM_MESSAGE_7_CARRY_0", PARAM_MESSAGE_7_CARRY_0),
         // ("PARAM_MESSAGE_8_CARRY_0", PARAM_MESSAGE_8_CARRY_0),
     ];
@@ -78,210 +78,244 @@ pub fn test_primitives() {
     for (param_name, param) in &params {
         // Création du contexte et génération des clés
         let mut ctx = Context::from(*param);
-        // let private_key = key(ctx.parameters());
         let private_key = PrivateKey::new(&mut ctx);
         let public_key = private_key.get_public_key();
 
-        // Test pour blind_rotate_assign avec LUT classique
-        let input = 1;
-        let lwe_input = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
-        let array = (0..ctx.full_message_modulus() as u64).collect();
-        let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        // Vérifie si le nom de la primitive correspond ou si aucun nom n'est donné
+        if primitive_name.is_none() || primitive_name == Some("blind_rotate") {
+            // Test pour blind_rotate_assign avec LUT classique
+            let input = 1;
+            let lwe_input = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
+            let array = (0..ctx.full_message_modulus() as u64).collect();
+            let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
 
-        benchmark(
-            "blind_rotate",
-            param_name,
-            "xLWE_xLUT",
-            || {
-                blind_rotate_assign(&lwe_input, &mut lut.0, &public_key.fourier_bsk);
-            },
-            &mut file,
-        );
+            benchmark(
+                "blind_rotate",
+                param_name,
+                "xLWE_xLUT",
+                || {
+                    blind_rotate_assign(&lwe_input, &mut lut.0, &public_key.fourier_bsk);
+                },
+                &mut file,
+            );
 
-        // Test pour blind_rotate_assign avec LUT trivial
-        let lwe_trivial = private_key.allocate_and_trivially_encrypt_lwe(input, &mut ctx);
-        benchmark(
-            "blind_rotate",
-            param_name,
-            "tLWE_xLUT",
-            || {
-                blind_rotate_assign(&lwe_trivial, &mut lut.0, &public_key.fourier_bsk);
-            },
-            &mut file,
-        );
+            // Test pour blind_rotate_assign avec LUT trivial
+            let lwe_trivial = private_key.allocate_and_trivially_encrypt_lwe(input, &mut ctx);
+            benchmark(
+                "blind_rotate",
+                param_name,
+                "tLWE_xLUT",
+                || {
+                    blind_rotate_assign(&lwe_trivial, &mut lut.0, &public_key.fourier_bsk);
+                },
+                &mut file,
+            );
 
-        // Test pour blind_rotate_assign avec LUT trivial
-        let mut lut_trivial = LUT::from_vec_trivially(&vec![1; array.len()], &mut ctx); // LUT trivial
+            // Test pour blind_rotate_assign avec LUT trivial
+            let mut lut_trivial = LUT::from_vec_trivially(&vec![1; array.len()], &mut ctx); // LUT trivial
 
-        benchmark(
-            "blind_rotate",
-            param_name,
-            "xLWE_tLUT",
-            || {
-                blind_rotate_assign(&lwe_input, &mut lut_trivial.0, &public_key.fourier_bsk);
-            },
-            &mut file,
-        );
+            benchmark(
+                "blind_rotate",
+                param_name,
+                "xLWE_tLUT",
+                || {
+                    blind_rotate_assign(&lwe_input, &mut lut_trivial.0, &public_key.fourier_bsk);
+                },
+                &mut file,
+            );
 
-        // Test pour blind_rotate_assign avec LUT trivial
-        let mut lut_trivial = LUT::from_vec_trivially(&vec![1; array.len()], &mut ctx); // LUT trivial
-        let lwe_trivial = private_key.allocate_and_trivially_encrypt_lwe(input, &mut ctx);
+            // Test pour blind_rotate_assign avec LUT trivial
+            let mut lut_trivial = LUT::from_vec_trivially(&vec![1; array.len()], &mut ctx); // LUT trivial
+            let lwe_trivial = private_key.allocate_and_trivially_encrypt_lwe(input, &mut ctx);
 
-        benchmark(
-            "blind_rotate",
-            param_name,
-            "tLWE_tLUT",
-            || {
-                blind_rotate_assign(&lwe_trivial, &mut lut_trivial.0, &public_key.fourier_bsk);
-            },
-            &mut file,
-        );
+            benchmark(
+                "blind_rotate",
+                param_name,
+                "tLWE_tLUT",
+                || {
+                    blind_rotate_assign(&lwe_trivial, &mut lut_trivial.0, &public_key.fourier_bsk);
+                },
+                &mut file,
+            );
+        }
 
-        // Test pour par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext avec LWE classique
-        let many_lwe: Vec<LweCiphertext<Vec<u64>>> = array
-            .iter()
-            .map(|&a| private_key.allocate_and_encrypt_lwe(a, &mut ctx))
-            .collect();
+        if primitive_name.is_none() || primitive_name == Some("packing_lwe_to_glwe") {
+            // Test pour par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext avec LWE classique
+            let array = (0..ctx.polynomial_size().0 as u64).collect::<Vec<u64>>();
+            let many_lwe: Vec<LweCiphertext<Vec<u64>>> = array
+                .iter()
+                .map(|&a| private_key.allocate_and_encrypt_lwe(a, &mut ctx))
+                .collect();
+            let many_lwe_container: Vec<u64> = many_lwe
+                .into_iter()
+                .map(|ct| ct.into_container())
+                .flatten()
+                .collect();
 
-        let lwe_list = LweCiphertextList::new(
-            0_u64,
-            ctx.small_lwe_dimension().to_lwe_size(),
-            LweCiphertextCount(many_lwe.len()),
-            ctx.ciphertext_modulus(),
-        );
+            let lwe_list = LweCiphertextList::from_container(
+                many_lwe_container,
+                ctx.small_lwe_dimension().to_lwe_size(),
+                ctx.ciphertext_modulus(),
+            );
 
-        benchmark(
-            "packing_lwe_to_glwe",
-            param_name,
-            "xLWE",
-            || {
-                let mut packed_glwe = GlweCiphertext::new(
-                    0_u64,
-                    ctx.glwe_dimension().to_glwe_size(),
-                    ctx.polynomial_size(),
-                    ctx.ciphertext_modulus(),
-                );
-                par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-                    &public_key.pfpksk,
-                    &mut packed_glwe,
-                    &lwe_list,
-                );
-            },
-            &mut file,
-        );
+            benchmark(
+                "packing_lwe_to_glwe",
+                param_name,
+                "xLWE",
+                || {
+                    let mut packed_glwe = GlweCiphertext::new(
+                        0_u64,
+                        ctx.glwe_dimension().to_glwe_size(),
+                        ctx.polynomial_size(),
+                        ctx.ciphertext_modulus(),
+                    );
+                    par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+                        &public_key.pfpksk,
+                        &mut packed_glwe,
+                        &lwe_list,
+                    );
+                },
+                &mut file,
+            );
 
-        // Test pour par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext avec LWE trivial
+            // Test pour par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext avec LWE trivial
+            let many_lwe_trivial: Vec<LweCiphertext<Vec<u64>>> = array
+                .iter()
+                .map(|&a| private_key.allocate_and_trivially_encrypt_lwe(a, &mut ctx))
+                .collect();
 
-        let many_lwe_trivial: Vec<LweCiphertext<Vec<u64>>> = array
-            .iter()
-            .map(|&a| private_key.allocate_and_trivially_encrypt_lwe(a, &mut ctx))
-            .collect();
+            let many_lwe_trivial_container: Vec<u64> = many_lwe_trivial
+                .into_iter()
+                .map(|ct| ct.into_container())
+                .flatten()
+                .collect();
 
-        let lwe_list_trivial = LweCiphertextList::new(
-            0_u64,
-            ctx.small_lwe_dimension().to_lwe_size(),
-            LweCiphertextCount(many_lwe_trivial.len()),
-            ctx.ciphertext_modulus(),
-        );
+            let lwe_list_trivial = LweCiphertextList::from_container(
+                many_lwe_trivial_container,
+                ctx.small_lwe_dimension().to_lwe_size(),
+                ctx.ciphertext_modulus(),
+            );
 
-        benchmark(
-            "packing_lwe_to_glwe",
-            param_name,
-            "tLWE",
-            || {
-                let mut packed_glwe = GlweCiphertext::new(
-                    0_u64,
-                    ctx.glwe_dimension().to_glwe_size(),
-                    ctx.polynomial_size(),
-                    ctx.ciphertext_modulus(),
-                );
-                par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
-                    &public_key.pfpksk,
-                    &mut packed_glwe,
-                    &lwe_list_trivial,
-                );
-            },
-            &mut file,
-        );
+            benchmark(
+                "packing_lwe_to_glwe",
+                param_name,
+                "tLWE",
+                || {
+                    let mut packed_glwe = GlweCiphertext::new(
+                        0_u64,
+                        ctx.glwe_dimension().to_glwe_size(),
+                        ctx.polynomial_size(),
+                        ctx.ciphertext_modulus(),
+                    );
+                    par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+                        &public_key.pfpksk,
+                        &mut packed_glwe,
+                        &lwe_list_trivial,
+                    );
+                },
+                &mut file,
+            );
+        }
 
-        // Test pour par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext
+        if primitive_name.is_none() || primitive_name == Some("packing_one_lwe_to_glwe") {
+            // Test pour par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext
+            let input = 1;
+            let lwe_input = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
 
-        benchmark(
-            "packing_one_lwe_to_glwe",
-            param_name,
-            "xLWE",
-            || {
-                let mut glwe = GlweCiphertext::new(
-                    0_u64,
-                    ctx.glwe_dimension().to_glwe_size(),
-                    ctx.polynomial_size(),
-                    ctx.ciphertext_modulus(),
-                );
-                par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
-                    &public_key.pfpksk,
-                    &mut glwe,
-                    &lwe_input,
-                );
-            },
-            &mut file,
-        );
+            benchmark(
+                "packing_one_lwe_to_glwe",
+                param_name,
+                "xLWE",
+                || {
+                    let mut glwe = GlweCiphertext::new(
+                        0_u64,
+                        ctx.glwe_dimension().to_glwe_size(),
+                        ctx.polynomial_size(),
+                        ctx.ciphertext_modulus(),
+                    );
+                    par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
+                        &public_key.pfpksk,
+                        &mut glwe,
+                        &lwe_input,
+                    );
+                },
+                &mut file,
+            );
 
-        // Test pour par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext
+            // Test pour par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext
 
-        let lwe_input_trivial = private_key.allocate_and_trivially_encrypt_lwe(input, &mut ctx);
-        benchmark(
-            "packing_one_lwe_to_glwe",
-            param_name,
-            "tLWE",
-            || {
-                let mut glwe = GlweCiphertext::new(
-                    0_u64,
-                    ctx.glwe_dimension().to_glwe_size(),
-                    ctx.polynomial_size(),
-                    ctx.ciphertext_modulus(),
-                );
-                par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
-                    &public_key.pfpksk,
-                    &mut glwe,
-                    &lwe_input_trivial,
-                );
-            },
-            &mut file,
-        );
+            let lwe_input_trivial = private_key.allocate_and_trivially_encrypt_lwe(input, &mut ctx);
+            benchmark(
+                "packing_one_lwe_to_glwe",
+                param_name,
+                "tLWE",
+                || {
+                    let mut glwe = GlweCiphertext::new(
+                        0_u64,
+                        ctx.glwe_dimension().to_glwe_size(),
+                        ctx.polynomial_size(),
+                        ctx.ciphertext_modulus(),
+                    );
+                    par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
+                        &public_key.pfpksk,
+                        &mut glwe,
+                        &lwe_input_trivial,
+                    );
+                },
+                &mut file,
+            );
+        }
 
-        // Test pour extract_lwe_sample_from_glwe_ciphertext
-        let mut big_lwe = LweCiphertext::new(
-            0_u64,
-            ctx.big_lwe_dimension().to_lwe_size(),
-            ctx.ciphertext_modulus(),
-        );
-        let mut lwe_output = LweCiphertext::new(
-            0_u64,
-            ctx.small_lwe_dimension().to_lwe_size(),
-            ctx.ciphertext_modulus(),
-        );
-        let lut_glwe = LUT::from_vec(&array, &private_key, &mut ctx).0;
+        if primitive_name.is_none()
+            || primitive_name == Some("extract_lwe_sample_from_glwe_ciphertext")
+        {
+            // Test pour extract_lwe_sample_from_glwe_ciphertext
+            let array = (0..ctx.full_message_modulus() as u64).collect::<Vec<u64>>();
+            let mut big_lwe = LweCiphertext::new(
+                0_u64,
+                ctx.big_lwe_dimension().to_lwe_size(),
+                ctx.ciphertext_modulus(),
+            );
+            let lut_glwe = LUT::from_vec(&array, &private_key, &mut ctx).0;
 
-        benchmark(
-            "extract_lwe_sample_from_glwe_ciphertext",
-            param_name,
-            "xGLWE",
-            || {
-                extract_lwe_sample_from_glwe_ciphertext(&lut_glwe, &mut big_lwe, MonomialDegree(0));
-            },
-            &mut file,
-        );
+            benchmark(
+                "extract_lwe_sample_from_glwe_ciphertext",
+                param_name,
+                "xGLWE",
+                || {
+                    extract_lwe_sample_from_glwe_ciphertext(
+                        &lut_glwe,
+                        &mut big_lwe,
+                        MonomialDegree(0),
+                    );
+                },
+                &mut file,
+            );
+        }
 
-        // Test pour keyswitch_lwe_ciphertext
-        benchmark(
-            "keyswitch_lwe_ciphertext",
-            param_name,
-            "xLWE",
-            || {
-                keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &big_lwe, &mut lwe_output);
-            },
-            &mut file,
-        );
+        if primitive_name.is_none() || primitive_name == Some("keyswitch_lwe_ciphertext") {
+            // Test pour keyswitch_lwe_ciphertext
+            let big_lwe = LweCiphertext::new(
+                0_u64,
+                ctx.big_lwe_dimension().to_lwe_size(),
+                ctx.ciphertext_modulus(),
+            );
+            let mut lwe_output = LweCiphertext::new(
+                0_u64,
+                ctx.small_lwe_dimension().to_lwe_size(),
+                ctx.ciphertext_modulus(),
+            );
+
+            benchmark(
+                "keyswitch_lwe_ciphertext",
+                param_name,
+                "xLWE",
+                || {
+                    keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &big_lwe, &mut lwe_output);
+                },
+                &mut file,
+            );
+        }
     }
 }
 

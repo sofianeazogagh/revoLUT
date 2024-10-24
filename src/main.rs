@@ -56,7 +56,11 @@ pub fn main() {
     // let sorted_lut = public_key.blind_counting_sort_modified(&lut, &ctx);
     // println!("{:?}", std::time::Instant::now() - now);
 
-    // test_primitives();
+    // let path = "./exports/packing_lwe_to_glwe_full.csv";
+    // test_primitives(Some("packing_lwe_to_glwe"), path);
+
+    // let path = "./exports/packing_one_lwe_to_glwe.csv";
+    // test_primitives(Some("packing_one_lwe_to_glwe"), path);
 
     show_performance(
         "./exports/benchmark_results.csv", // Nom du fichier CSV
