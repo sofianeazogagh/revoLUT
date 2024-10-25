@@ -1,0 +1,19 @@
+Primitive,k,Parameters,Time (ms)
+packing_one_lwe_to_glwe,1,"PARAM_MESSAGE_6_CARRY_0",2.366832
+packing_lwe_to_glwe,1,"PARAM_MESSAGE_6_CARRY_0",5.006122
+packing_one_lwe_to_glwe,2,"PARAM_MESSAGE_6_CARRY_0",4.800568
+packing_lwe_to_glwe,2,"PARAM_MESSAGE_6_CARRY_0",5.317215999999999
+packing_one_lwe_to_glwe,3,"PARAM_MESSAGE_6_CARRY_0",7.10979
+packing_lwe_to_glwe,3,"PARAM_MESSAGE_6_CARRY_0",5.574185
+packing_one_lwe_to_glwe,4,"PARAM_MESSAGE_6_CARRY_0",9.433123
+packing_lwe_to_glwe,4,"PARAM_MESSAGE_6_CARRY_0",5.726888000000001
+packing_one_lwe_to_glwe,5,"PARAM_MESSAGE_6_CARRY_0",11.778179999999999
+packing_lwe_to_glwe,5,"PARAM_MESSAGE_6_CARRY_0",7.665815
+packing_one_lwe_to_glwe,6,"PARAM_MESSAGE_6_CARRY_0",14.090530000000001
+packing_lwe_to_glwe,6,"PARAM_MESSAGE_6_CARRY_0",8.434109000000001
+packing_one_lwe_to_glwe,7,"PARAM_MESSAGE_6_CARRY_0",16.407484
+packing_lwe_to_glwe,7,"PARAM_MESSAGE_6_CARRY_0",10.210202
+packing_one_lwe_to_glwe,8,"PARAM_MESSAGE_6_CARRY_0",18.797264000000002
+packing_lwe_to_glwe,8,"PARAM_MESSAGE_6_CARRY_0",10.346245
+packing_one_lwe_to_glwe,9,"PARAM_MESSAGE_6_CARRY_0",21.258787
+packing_lwe_to_glwe,9,"PARAM_MESSAGE_6_CARRY_0",13.572650000000001

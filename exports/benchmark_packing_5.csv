@@ -1,0 +1,19 @@
+Primitive,k,Parameters,Time (ms)
+packing_one_lwe_to_glwe,1,"PARAM_MESSAGE_5_CARRY_0",1.694755
+packing_lwe_to_glwe,1,"PARAM_MESSAGE_5_CARRY_0",2.3345029999999998
+packing_one_lwe_to_glwe,2,"PARAM_MESSAGE_5_CARRY_0",2.34884
+packing_lwe_to_glwe,2,"PARAM_MESSAGE_5_CARRY_0",2.971163
+packing_one_lwe_to_glwe,3,"PARAM_MESSAGE_5_CARRY_0",3.6889420000000004
+packing_lwe_to_glwe,3,"PARAM_MESSAGE_5_CARRY_0",2.616317
+packing_one_lwe_to_glwe,4,"PARAM_MESSAGE_5_CARRY_0",4.566124
+packing_lwe_to_glwe,4,"PARAM_MESSAGE_5_CARRY_0",2.651618
+packing_one_lwe_to_glwe,5,"PARAM_MESSAGE_5_CARRY_0",5.677551
+packing_lwe_to_glwe,5,"PARAM_MESSAGE_5_CARRY_0",3.623714
+packing_one_lwe_to_glwe,6,"PARAM_MESSAGE_5_CARRY_0",6.957598
+packing_lwe_to_glwe,6,"PARAM_MESSAGE_5_CARRY_0",3.872858
+packing_one_lwe_to_glwe,7,"PARAM_MESSAGE_5_CARRY_0",7.97582
+packing_lwe_to_glwe,7,"PARAM_MESSAGE_5_CARRY_0",4.181243
+packing_one_lwe_to_glwe,8,"PARAM_MESSAGE_5_CARRY_0",9.116737
+packing_lwe_to_glwe,8,"PARAM_MESSAGE_5_CARRY_0",4.724844
+packing_one_lwe_to_glwe,9,"PARAM_MESSAGE_5_CARRY_0",10.208358
+packing_lwe_to_glwe,9,"PARAM_MESSAGE_5_CARRY_0",5.974526

@@ -141,7 +141,8 @@ pub fn test_primitives(primitive_name: Option<&str>, path: &str) {
 
         if primitive_name.is_none() || primitive_name == Some("packing_lwe_to_glwe") {
             // Test pour par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext avec LWE classique
-            let array = (0..ctx.polynomial_size().0 as u64).collect::<Vec<u64>>();
+            let number_of_lwe: u64 = ctx.full_message_modulus() as u64;
+            let array = (0..number_of_lwe).collect::<Vec<u64>>();
             let many_lwe: Vec<LweCiphertext<Vec<u64>>> = array
                 .iter()
                 .map(|&a| private_key.allocate_and_encrypt_lwe(a, &mut ctx))
@@ -340,5 +341,105 @@ pub fn show_performance(filename: &str, primitive_name: &str, parameter: &str, v
         if primitive == primitive_name && variant_type == variant && param == parameter {
             println!("{},{},{:?},{:?}ms", primitive, variant_type, param, time_ms);
         }
+    }
+}
+
+// ... existing code ...
+
+pub fn benchmark_packing(param_name: &str, path: &str) {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("Impossible to open the file");
+
+    if PRINT_HEADERS_IN_CSV {
+        writeln!(file, "Primitive,k,Parameters,Time (ms)")
+            .expect("Error while writing in the file");
+    }
+
+    let params = vec![
+        ("PARAM_MESSAGE_2_CARRY_0", PARAM_MESSAGE_2_CARRY_0),
+        ("PARAM_MESSAGE_3_CARRY_0", PARAM_MESSAGE_3_CARRY_0),
+        ("PARAM_MESSAGE_4_CARRY_0", PARAM_MESSAGE_4_CARRY_0),
+        ("PARAM_MESSAGE_5_CARRY_0", PARAM_MESSAGE_5_CARRY_0),
+        ("PARAM_MESSAGE_6_CARRY_0", PARAM_MESSAGE_6_CARRY_0),
+        ("PARAM_MESSAGE_7_CARRY_0", PARAM_MESSAGE_7_CARRY_0),
+        // ("PARAM_MESSAGE_8_CARRY_0", PARAM_MESSAGE_8_CARRY_0),
+    ];
+
+    if let Some((_, param)) = params.iter().find(|&&(name, _)| name == param_name) {
+        let mut ctx = Context::from(*param);
+        let private_key = PrivateKey::new(&mut ctx);
+        let public_key = private_key.get_public_key();
+
+        for k in (1..10).step_by(1) {
+            // Example values for k
+            // Measure k calls to packing_one_lwe_to_glwe
+            benchmark(
+                "packing_one_lwe_to_glwe",
+                param_name,
+                &format!("{}", k),
+                || {
+                    for _ in 0..k {
+                        let input = 1;
+                        let lwe_input = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
+                        let mut glwe = GlweCiphertext::new(
+                            0_u64,
+                            ctx.glwe_dimension().to_glwe_size(),
+                            ctx.polynomial_size(),
+                            ctx.ciphertext_modulus(),
+                        );
+                        par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
+                            &public_key.pfpksk,
+                            &mut glwe,
+                            &lwe_input,
+                        );
+                    }
+                },
+                &mut file,
+            );
+
+            // Measure one call to packing_lwe_to_glwe with number_of_lwe = k
+            let number_of_lwe: u64 = k as u64;
+            let array = (0..number_of_lwe).collect::<Vec<u64>>();
+            let many_lwe: Vec<LweCiphertext<Vec<u64>>> = array
+                .iter()
+                .map(|&a| private_key.allocate_and_encrypt_lwe(a, &mut ctx))
+                .collect();
+            let many_lwe_container: Vec<u64> = many_lwe
+                .into_iter()
+                .map(|ct| ct.into_container())
+                .flatten()
+                .collect();
+
+            let lwe_list = LweCiphertextList::from_container(
+                many_lwe_container,
+                ctx.small_lwe_dimension().to_lwe_size(),
+                ctx.ciphertext_modulus(),
+            );
+
+            benchmark(
+                "packing_lwe_to_glwe",
+                param_name,
+                &format!("{}", k),
+                || {
+                    let mut packed_glwe = GlweCiphertext::new(
+                        0_u64,
+                        ctx.glwe_dimension().to_glwe_size(),
+                        ctx.polynomial_size(),
+                        ctx.ciphertext_modulus(),
+                    );
+                    par_private_functional_keyswitch_lwe_ciphertext_list_and_pack_in_glwe_ciphertext(
+                        &public_key.pfpksk,
+                        &mut packed_glwe,
+                        &lwe_list,
+                    );
+                },
+                &mut file,
+            );
+        }
+    } else {
+        eprintln!("Paramètre non trouvé: {}", param_name);
     }
 }

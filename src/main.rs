@@ -10,7 +10,7 @@ use tfhe::shortint::parameters::*;
 // use uni_test::*;
 
 mod performance_test;
-
+use performance_test::*;
 pub fn generate_keys() {
     println!("generating keys and saving them to disk");
     let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
@@ -38,20 +38,20 @@ pub fn generate_keys() {
 
 pub fn main() {
     // generate_keys();
-    let param = PARAM_MESSAGE_4_CARRY_0;
-    let mut ctx = Context::from(param);
-    let private_key = key(param);
-    let public_key = &private_key.public_key;
-    let array = vec![3, 2, 1, 2];
-    let lut = LUT::from_vec(&array, &private_key, &mut ctx);
-    lut.print(&private_key, &ctx);
+    // let param = PARAM_MESSAGE_4_CARRY_0;
+    // let mut ctx = Context::from(param);
+    // let private_key = key(param);
+    // let public_key = &private_key.public_key;
+    // let array = vec![3, 2, 1, 2];
+    // let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+    // lut.print(&private_key, &ctx);
 
-    for k in 2..10 {
-        let now = std::time::Instant::now();
-        let sorted_lut = public_key.blind_counting_sort_k(&lut, &ctx, k);
-        println!("{:?}", std::time::Instant::now() - now);
-        sorted_lut.print(&private_key, &ctx);
-    }
+    // for k in 2..10 {
+    //     let now = std::time::Instant::now();
+    //     let sorted_lut = public_key.blind_counting_sort_k(&lut, &ctx, k);
+    //     println!("{:?}", std::time::Instant::now() - now);
+    //     sorted_lut.print(&private_key, &ctx);
+    // }
 
     // let path = "./exports/packing_lwe_to_glwe_full.csv";
     // test_primitives(Some("packing_lwe_to_glwe"), path);
@@ -65,4 +65,9 @@ pub fn main() {
     //     "PARAM_MESSAGE_4_CARRY_0",         // Paramètre à rechercher
     //     "xLWE",                            // Variante à rechercher
     // )
+
+    // benchmark_packing(
+    //     "PARAM_MESSAGE_5_CARRY_0",
+    //     "./exports/benchmark_packing_5.csv",
+    // );
 }
