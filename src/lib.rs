@@ -1561,6 +1561,56 @@ impl PublicKey {
         // tournament style
         self.blind_topk(&result, k, ctx)
     }
+
+    pub fn blind_topk_many_lut(
+        &self,
+        // lwes: &[LWE],
+        // other_lwes: &[LWE],
+        many_lwes: &Vec<Vec<LWE>>,
+        k: usize,
+        ctx: &Context,
+    ) -> Vec<Vec<LWE>> {
+        println!("new round of top{k} with {} elements", many_lwes[0].len());
+        if many_lwes[0].len() <= k {
+            return many_lwes.to_vec();
+        }
+        let n = ctx.full_message_modulus();
+        assert!(k < n);
+        let chunk_number = many_lwes[0].len().div_ceil(n);
+        let mut result1 = vec![];
+        let mut result2 = vec![];
+        let mut result = vec![];
+        for (i, (chunk1, chunk2)) in many_lwes[0]
+            .chunks(n)
+            .zip(many_lwes[1].chunks(n))
+            .enumerate()
+        {
+            print!(
+                "top{k} of chunk ({}/{}) of len {}: ",
+                i + 1,
+                chunk_number,
+                chunk1.len()
+            );
+            assert!(chunk1.len() <= n);
+            let lut_to_sort = LUT::from_vec_of_lwe(chunk1, self, ctx);
+            let lut_other = LUT::from_vec_of_lwe(chunk2, self, ctx);
+            let luts = vec![&lut_to_sort, &lut_other];
+            let start = Instant::now();
+            let sorted_luts = self.many_blind_counting_sort_k(&luts, ctx, chunk1.len());
+            println!("{:?}", Instant::now() - start);
+            result1.extend(
+                (0..k.min(chunk1.len())).map(|i| self.sample_extract(&sorted_luts[0], i, ctx)),
+            );
+            result2.extend(
+                (0..k.min(chunk2.len())).map(|i| self.sample_extract(&sorted_luts[1], i, ctx)),
+            );
+        }
+        result.push(result1);
+        result.push(result2);
+        assert!(result.len() < many_lwes[0].len());
+        // tournament style
+        self.blind_topk_many_lut(&result, k, ctx)
+    }
 }
 
 pub struct LUT(pub GlweCiphertext<Vec<u64>>);
@@ -2873,6 +2923,27 @@ mod test {
 
         let start = Instant::now();
         public_key.blind_topk(&lwes, 5, &ctx);
+        println!("total time: {:?}", Instant::now() - start);
+    }
+    #[test]
+    pub fn test_blind_topk_many_lut() {
+        let param = PARAM_MESSAGE_4_CARRY_0;
+        let mut ctx = Context::from(param);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let lwes1: Vec<LWE> = (0..50)
+            .map(|i| private_key.allocate_and_encrypt_lwe(i, &mut ctx))
+            .collect();
+
+        let lwes2: Vec<LWE> = (0..50)
+            .map(|i| private_key.allocate_and_encrypt_lwe(269 - i, &mut ctx))
+            .collect();
+
+        let many_lwes = vec![lwes1, lwes2];
+
+        let start = Instant::now();
+        public_key.blind_topk_many_lut(&many_lwes, 3, &ctx);
         println!("total time: {:?}", Instant::now() - start);
     }
 }
