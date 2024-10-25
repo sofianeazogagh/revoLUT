@@ -96,12 +96,7 @@ impl crate::PublicKey {
             .unwrap()
     }
 
-    pub fn many_blind_counting_sort_k(
-        &self,
-        luts: &Vec<&LUT>,
-        ctx: &Context,
-        k: usize,
-    ) -> Vec<LUT> {
+    pub fn many_blind_counting_sort_k(&self, luts: &[&LUT], ctx: &Context, k: usize) -> Vec<LUT> {
         let n = ctx.full_message_modulus;
         let m = luts.len();
         let mut count = LUT::from_vec_trivially(&vec![0; n], ctx);
