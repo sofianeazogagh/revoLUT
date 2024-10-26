@@ -6,11 +6,12 @@ extern crate quickcheck_macros;
 
 use aligned_vec::ABox;
 use num_complex::Complex;
-use rayon::iter::{IntoParallelIterator, ParallelExtend, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelExtend, ParallelIterator};
+use rayon::ThreadPoolBuilder;
 use serde::{Deserialize, Serialize};
 use std::fs;
 // use std::process::Output;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 use tfhe::shortint::{CarryModulus, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
@@ -1562,11 +1563,10 @@ impl PublicKey {
         self.blind_topk(&result, k, ctx)
     }
 
+    // TODO : a generalisé pour m vecteurs de lwe (pour l'instant m=2)
     pub fn blind_topk_many_lut(
         &self,
-        // lwes: &[LWE],
-        // other_lwes: &[LWE],
-        many_lwes: &Vec<Vec<LWE>>,
+        many_lwes: &Vec<Vec<LWE>>, // slice of slices
         k: usize,
         ctx: &Context,
     ) -> Vec<Vec<LWE>> {
@@ -1576,7 +1576,7 @@ impl PublicKey {
         }
         let n = ctx.full_message_modulus();
         assert!(k < n);
-        let chunk_number = many_lwes[0].len().div_ceil(n);
+        // let chunk_number = many_lwes[0].len().div_ceil(n);
         let mut result1 = vec![];
         let mut result2 = vec![];
         let mut result = vec![];
@@ -1585,19 +1585,19 @@ impl PublicKey {
             .zip(many_lwes[1].chunks(n))
             .enumerate()
         {
-            print!(
-                "top{k} of chunk ({}/{}) of len {}: ",
-                i + 1,
-                chunk_number,
-                chunk1.len()
-            );
+            // print!(
+            //     "top{k} of chunk ({}/{}) of len {}: ",
+            //     i + 1,
+            //     chunk_number,
+            //     chunk1.len()
+            // );
             assert!(chunk1.len() <= n);
             let lut_to_sort = LUT::from_vec_of_lwe(chunk1, self, ctx);
             let lut_other = LUT::from_vec_of_lwe(chunk2, self, ctx);
             let luts = vec![&lut_to_sort, &lut_other];
-            let start = Instant::now();
+            // let start = Instant::now();
             let sorted_luts = self.many_blind_counting_sort_k(&luts, ctx, chunk1.len());
-            println!("{:?}", Instant::now() - start);
+            // println!("{:?}", Instant::now() - start);
             result1.extend(
                 (0..k.min(chunk1.len())).map(|i| self.sample_extract(&sorted_luts[0], i, ctx)),
             );
@@ -1609,6 +1609,70 @@ impl PublicKey {
         result.push(result2);
         assert!(result.len() < many_lwes[0].len());
         // tournament style
+        self.blind_topk_many_lut(&result, k, ctx)
+    }
+
+    pub fn blind_topk_many_lut_par(
+        &self,
+        many_lwes: &Vec<Vec<LWE>>, // slice of slices
+        k: usize,
+        ctx: &Context,
+    ) -> Vec<Vec<LWE>> {
+        // Créez un pool de threads avec 4 threads
+        let pool = ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+
+        // println!("new round of top{k} with {} elements", many_lwes[0].len());
+        if many_lwes[0].len() <= k {
+            return many_lwes.to_vec();
+        }
+        let n = ctx.full_message_modulus();
+        assert!(k < n);
+
+        // Utilisez Mutex pour permettre un accès concurrent sécurisé aux résultats
+        let result1 = Mutex::new(vec![]);
+        let result2 = Mutex::new(vec![]);
+
+        // Utilisez le pool de threads pour paralléliser l'itération
+        pool.scope(|s| {
+            s.spawn(|_| {
+                many_lwes[0]
+                    .chunks(n)
+                    .zip(many_lwes[1].chunks(n))
+                    .enumerate()
+                    .par_bridge()
+                    .for_each(|(_, (chunk1, chunk2))| {
+                        assert!(chunk1.len() <= n);
+                        let lut_to_sort = LUT::from_vec_of_lwe(chunk1, self, ctx);
+                        let lut_other = LUT::from_vec_of_lwe(chunk2, self, ctx);
+                        let luts = vec![&lut_to_sort, &lut_other];
+                        // let start = Instant::now();
+                        let sorted_luts = self.many_blind_counting_sort_k(
+                            &luts,
+                            ctx,
+                            chunk1.len().min(chunk2.len()),
+                        );
+                        // println!("{:?}", Instant::now() - start);
+
+                        // Ajoutez les résultats dans les vecteurs protégés
+                        let mut res1 = result1.lock().unwrap();
+                        res1.extend(
+                            (0..k.min(chunk1.len()))
+                                .map(|i| self.sample_extract(&sorted_luts[0], i, ctx)),
+                        );
+
+                        let mut res2 = result2.lock().unwrap();
+                        res2.extend(
+                            (0..k.min(chunk2.len()))
+                                .map(|i| self.sample_extract(&sorted_luts[1], i, ctx)),
+                        );
+                    });
+            });
+        });
+
+        let result = vec![result1.into_inner().unwrap(), result2.into_inner().unwrap()];
+        assert!(result.len() < many_lwes[0].len());
+
+        // Appel récursif en style tournoi
         self.blind_topk_many_lut(&result, k, ctx)
     }
 }
@@ -2917,14 +2981,28 @@ mod test {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let lwes: Vec<LWE> = (0..269)
-            .map(|i| private_key.allocate_and_encrypt_lwe(i, &mut ctx))
+        let mut array = vec![10u64; 269];
+        array[1] = 1;
+        array[100] = 2;
+        array[150] = 3;
+        array[200] = 4;
+
+        println!("{:?}", array);
+
+        let lwes: Vec<LWE> = array
+            .iter()
+            .map(|i| private_key.allocate_and_encrypt_lwe(*i, &mut ctx))
             .collect();
 
         let start = Instant::now();
-        public_key.blind_topk(&lwes, 5, &ctx);
+        let res = public_key.blind_topk(&lwes, 3, &ctx);
         println!("total time: {:?}", Instant::now() - start);
+
+        for lwe in res {
+            println!("{}", private_key.decrypt_lwe(&lwe, &ctx));
+        }
     }
+
     #[test]
     pub fn test_blind_topk_many_lut() {
         let param = PARAM_MESSAGE_4_CARRY_0;
@@ -2932,18 +3010,32 @@ mod test {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let lwes1: Vec<LWE> = (0..50)
-            .map(|i| private_key.allocate_and_encrypt_lwe(i, &mut ctx))
+        let mut array = vec![10u64; 269];
+        array[1] = 1;
+        array[10] = 2;
+        array[15] = 3;
+        array[20] = 4;
+
+        let lwes1: Vec<LWE> = array
+            .iter()
+            .map(|i| private_key.allocate_and_encrypt_lwe(*i, &mut ctx))
             .collect();
 
-        let lwes2: Vec<LWE> = (0..50)
-            .map(|i| private_key.allocate_and_encrypt_lwe(269 - i, &mut ctx))
+        let lwes2: Vec<LWE> = (0..array.len() - 1)
+            .map(|i| private_key.allocate_and_encrypt_lwe(i as u64, &mut ctx))
             .collect();
 
         let many_lwes = vec![lwes1, lwes2];
 
         let start = Instant::now();
-        public_key.blind_topk_many_lut(&many_lwes, 3, &ctx);
+        let res = public_key.blind_topk_many_lut_par(&many_lwes, 3, &ctx);
         println!("total time: {:?}", Instant::now() - start);
+
+        for vec_lwe in res {
+            println!("vec_lwe");
+            for lwe in vec_lwe {
+                println!("{}", private_key.decrypt_lwe(&lwe, &ctx));
+            }
+        }
     }
 }
