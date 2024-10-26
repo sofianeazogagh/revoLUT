@@ -9,7 +9,8 @@ use tfhe::shortint::parameters::*;
 // mod uni_test;
 // use uni_test::*;
 
-mod performance_test;
+// mod performance_test;
+// use performance_test::*;
 
 pub fn generate_keys() {
     println!("generating keys and saving them to disk");

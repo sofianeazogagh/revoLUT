@@ -1580,7 +1580,7 @@ impl PublicKey {
         let mut result1 = vec![];
         let mut result2 = vec![];
         let mut result = vec![];
-        for (i, (chunk1, chunk2)) in many_lwes[0]
+        for (_, (chunk1, chunk2)) in many_lwes[0]
             .chunks(n)
             .zip(many_lwes[1].chunks(n))
             .enumerate()
