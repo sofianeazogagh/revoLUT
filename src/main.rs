@@ -71,8 +71,13 @@ pub fn main() {
     //     "./exports/benchmark_packing_5.csv",
     // );
 
+    // benchmark_packing_lut(
+    //     "PARAM_MESSAGE_4_CARRY_0",
+    //     "./exports/benchmark_packing_lut_4.csv",
+    // );
+
     benchmark_packing_lut(
         "PARAM_MESSAGE_4_CARRY_0",
-        "./exports/benchmark_packing_lut_4.csv",
+        "./exports/benchmark_packing_mul_and_sum_4.csv",
     );
 }

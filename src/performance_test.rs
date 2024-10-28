@@ -1,5 +1,6 @@
 // use rayon::prelude::*;
 use csv::ReaderBuilder;
+use polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::BufReader;
@@ -471,32 +472,71 @@ pub fn benchmark_packing_lut(param_name: &str, path: &str) {
         let private_key = PrivateKey::new(&mut ctx);
         let public_key = private_key.get_public_key();
 
-        let max_k = ctx.full_message_modulus() as usize;
+        let n = ctx.full_message_modulus() as usize;
 
-        for k in (1..max_k).step_by(1) {
+        // Redundancy polynomial
+        let redundancy = vec![1; ctx.box_size()]
+            .into_iter()
+            .chain(vec![0; ctx.polynomial_size().0 - ctx.box_size()])
+            .collect::<Vec<u64>>();
+        let mut poly_redundancy = Polynomial::<Vec<u64>>::from_container(redundancy);
+
+        // Result GlweCiphertext
+        let mut result = GlweCiphertext::<Vec<u64>>::new(
+            0u64,
+            ctx.glwe_dimension().to_glwe_size(),
+            ctx.polynomial_size(),
+            ctx.ciphertext_modulus(),
+        );
+
+        for k in (5..n).step_by(1) {
+            let number_of_lwe: u64 = k as u64;
+            let array = (1..number_of_lwe + 1).collect::<Vec<u64>>();
+            let many_lwe: Vec<LweCiphertext<Vec<u64>>> = array
+                .iter()
+                .map(|&a| private_key.allocate_and_encrypt_lwe(a, &mut ctx))
+                .collect();
             // Example values for k
-            // Measure k calls to packing_one_lwe_to_glwe
+            // Measure k calls to packing_mul_and_sum
             benchmark(
-                "lut_from_lwe",
+                "packing_mul_and_sum",
                 param_name,
                 &format!("{}", k),
                 || {
-                    for _ in 0..k {
-                        let input = 1;
-                        let lwe_input = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
-                        LUT::from_lwe(&lwe_input, &public_key, &mut ctx);
+                    for lwe in many_lwe.iter() {
+                        let mut glwe = GlweCiphertext::<Vec<u64>>::new(
+                            0u64,
+                            ctx.glwe_dimension().to_glwe_size(),
+                            ctx.polynomial_size(),
+                            ctx.ciphertext_modulus(),
+                        );
+                        // pack lwe into glwe
+                        par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
+                            &public_key.pfpksk,
+                            &mut glwe,
+                            lwe,
+                        );
+                        // absorption polynomial to add the redundancy
+                        let one_box = public_key
+                            .glwe_absorption_polynomial_with_fft(&mut glwe, &poly_redundancy);
+                        // sum the redundant glwe to the result
+                        public_key.glwe_sum_assign(&mut result, &one_box);
+                        // update the redundancy polynomial by rotating it
+                        polynomial_wrapping_monic_monomial_mul_assign(
+                            &mut poly_redundancy,
+                            MonomialDegree(ctx.box_size()),
+                        );
                     }
+                    // half box rotation to manage the negacyclic property
+                    let poly_monomial_degree =
+                        MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
+                    public_key.glwe_absorption_monic_monomial(&mut result, poly_monomial_degree);
+                    // private_key.debug_glwe(&format!("k = {}", k), &result, &ctx);
                 },
                 &mut file,
             );
 
             // Measure one call to packing_lwe_to_glwe with number_of_lwe = k
-            let number_of_lwe: u64 = k as u64;
-            let array = (0..number_of_lwe).collect::<Vec<u64>>();
-            let many_lwe: Vec<LweCiphertext<Vec<u64>>> = array
-                .iter()
-                .map(|&a| private_key.allocate_and_encrypt_lwe(a, &mut ctx))
-                .collect();
 
             benchmark(
                 "lut_from_vec_of_lwe",

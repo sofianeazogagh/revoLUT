@@ -1,0 +1,23 @@
+Primitive,k,Parameters,Time (ms)
+packing_mul_and_sum,5,"PARAM_MESSAGE_4_CARRY_0",2.6900399999999998
+lut_from_vec_of_lwe,5,"PARAM_MESSAGE_4_CARRY_0",155.623615
+packing_mul_and_sum,6,"PARAM_MESSAGE_4_CARRY_0",3.249909
+lut_from_vec_of_lwe,6,"PARAM_MESSAGE_4_CARRY_0",189.68923800000002
+packing_mul_and_sum,7,"PARAM_MESSAGE_4_CARRY_0",3.744595
+lut_from_vec_of_lwe,7,"PARAM_MESSAGE_4_CARRY_0",249.17995200000001
+packing_mul_and_sum,8,"PARAM_MESSAGE_4_CARRY_0",4.671697
+lut_from_vec_of_lwe,8,"PARAM_MESSAGE_4_CARRY_0",285.96887100000004
+packing_mul_and_sum,9,"PARAM_MESSAGE_4_CARRY_0",5.867222
+lut_from_vec_of_lwe,9,"PARAM_MESSAGE_4_CARRY_0",294.58792
+packing_mul_and_sum,10,"PARAM_MESSAGE_4_CARRY_0",5.517141
+lut_from_vec_of_lwe,10,"PARAM_MESSAGE_4_CARRY_0",321.423485
+packing_mul_and_sum,11,"PARAM_MESSAGE_4_CARRY_0",6.4848
+lut_from_vec_of_lwe,11,"PARAM_MESSAGE_4_CARRY_0",445.85102
+packing_mul_and_sum,12,"PARAM_MESSAGE_4_CARRY_0",6.661798
+lut_from_vec_of_lwe,12,"PARAM_MESSAGE_4_CARRY_0",457.345572
+packing_mul_and_sum,13,"PARAM_MESSAGE_4_CARRY_0",6.987100000000001
+lut_from_vec_of_lwe,13,"PARAM_MESSAGE_4_CARRY_0",450.203642
+packing_mul_and_sum,14,"PARAM_MESSAGE_4_CARRY_0",7.682713
+lut_from_vec_of_lwe,14,"PARAM_MESSAGE_4_CARRY_0",470.75061600000004
+packing_mul_and_sum,15,"PARAM_MESSAGE_4_CARRY_0",8.665407
+lut_from_vec_of_lwe,15,"PARAM_MESSAGE_4_CARRY_0",515.0359970000001
