@@ -443,3 +443,72 @@ pub fn benchmark_packing(param_name: &str, path: &str) {
         eprintln!("Paramètre non trouvé: {}", param_name);
     }
 }
+
+pub fn benchmark_packing_lut(param_name: &str, path: &str) {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .expect("Impossible to open the file");
+
+    if PRINT_HEADERS_IN_CSV {
+        writeln!(file, "Primitive,k,Parameters,Time (ms)")
+            .expect("Error while writing in the file");
+    }
+
+    let params = vec![
+        ("PARAM_MESSAGE_2_CARRY_0", PARAM_MESSAGE_2_CARRY_0),
+        ("PARAM_MESSAGE_3_CARRY_0", PARAM_MESSAGE_3_CARRY_0),
+        ("PARAM_MESSAGE_4_CARRY_0", PARAM_MESSAGE_4_CARRY_0),
+        ("PARAM_MESSAGE_5_CARRY_0", PARAM_MESSAGE_5_CARRY_0),
+        ("PARAM_MESSAGE_6_CARRY_0", PARAM_MESSAGE_6_CARRY_0),
+        ("PARAM_MESSAGE_7_CARRY_0", PARAM_MESSAGE_7_CARRY_0),
+        // ("PARAM_MESSAGE_8_CARRY_0", PARAM_MESSAGE_8_CARRY_0),
+    ];
+
+    if let Some((_, param)) = params.iter().find(|&&(name, _)| name == param_name) {
+        let mut ctx = Context::from(*param);
+        let private_key = PrivateKey::new(&mut ctx);
+        let public_key = private_key.get_public_key();
+
+        let max_k = ctx.full_message_modulus() as usize;
+
+        for k in (1..max_k).step_by(1) {
+            // Example values for k
+            // Measure k calls to packing_one_lwe_to_glwe
+            benchmark(
+                "lut_from_lwe",
+                param_name,
+                &format!("{}", k),
+                || {
+                    for _ in 0..k {
+                        let input = 1;
+                        let lwe_input = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
+                        LUT::from_lwe(&lwe_input, &public_key, &mut ctx);
+                    }
+                },
+                &mut file,
+            );
+
+            // Measure one call to packing_lwe_to_glwe with number_of_lwe = k
+            let number_of_lwe: u64 = k as u64;
+            let array = (0..number_of_lwe).collect::<Vec<u64>>();
+            let many_lwe: Vec<LweCiphertext<Vec<u64>>> = array
+                .iter()
+                .map(|&a| private_key.allocate_and_encrypt_lwe(a, &mut ctx))
+                .collect();
+
+            benchmark(
+                "lut_from_vec_of_lwe",
+                param_name,
+                &format!("{}", k),
+                || {
+                    LUT::from_vec_of_lwe(&many_lwe, &public_key, &ctx);
+                },
+                &mut file,
+            );
+        }
+    } else {
+        eprintln!("Paramètre non trouvé: {}", param_name);
+    }
+}

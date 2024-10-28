@@ -70,4 +70,9 @@ pub fn main() {
     //     "PARAM_MESSAGE_5_CARRY_0",
     //     "./exports/benchmark_packing_5.csv",
     // );
+
+    benchmark_packing_lut(
+        "PARAM_MESSAGE_4_CARRY_0",
+        "./exports/benchmark_packing_lut_4.csv",
+    );
 }
