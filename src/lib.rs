@@ -9,7 +9,8 @@ use num_complex::Complex;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelExtend, ParallelIterator};
 use rayon::ThreadPoolBuilder;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Read, Write};
 // use std::process::Output;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
@@ -426,6 +427,13 @@ impl PrivateKey {
         let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta()
             % ctx.full_message_modulus() as u64;
         result
+    }
+
+    pub fn decrypt_lwe_vector(&self, ciphertext: &Vec<LWE>, ctx: &Context) -> Vec<u64> {
+        ciphertext
+            .iter()
+            .map(|ct| self.decrypt_lwe(ct, ctx))
+            .collect()
     }
 
     pub fn decrypt_lwe_big_key(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
@@ -895,6 +903,20 @@ impl PublicKey {
 
         glwe_ciphertext_cleartext_mul(&mut res, &glwe, Cleartext(constant));
         return res;
+    }
+
+    pub fn serialize_lwe_vector_to_file(&self, lwe_vector: &Vec<LWE>, file_path: &str) {
+        let json = serde_json::to_string(lwe_vector).expect("Failed to serialize LWE vector");
+        let mut file = File::create(file_path).expect("Failed to create file");
+        file.write_all(json.as_bytes())
+            .expect("Failed to write to file");
+    }
+
+    pub fn deserialize_lwe_vector_from_file(&self, file_path: &str) -> Vec<LWE> {
+        let mut file = File::open(file_path).expect("Failed to open file");
+        let mut json = String::new();
+        file.read_to_string(&mut json).expect("Failed to read file");
+        serde_json::from_str(&json).expect("Failed to deserialize LWE vector")
     }
 
     // revoLUT operations
@@ -1428,7 +1450,7 @@ impl PublicKey {
         k: usize,
         ctx: &Context,
     ) -> Vec<Vec<LWE>> {
-        println!("new round of top{k} with {} elements", many_lwes[0].len());
+        // println!("new round of top{k} with {} elements", many_lwes[0].len());
         if many_lwes[0].len() <= k {
             return many_lwes.to_vec();
         }
@@ -1489,6 +1511,10 @@ impl PublicKey {
         // Utilisez Mutex pour permettre un accès concurrent sécurisé aux résultats
         let result1 = Mutex::new(vec![]);
         let result2 = Mutex::new(vec![]);
+        let private_key = key(ctx.parameters());
+
+        let many_lwes_decrypted = private_key.decrypt_lwe_vector(&many_lwes[0], ctx);
+        println!("many_lwes_decrypted: {:?}", many_lwes_decrypted);
 
         // Utilisez le pool de threads pour paralléliser l'itération
         pool.scope(|s| {
@@ -1501,7 +1527,11 @@ impl PublicKey {
                     .for_each(|(_, (chunk1, chunk2))| {
                         assert!(chunk1.len() <= n);
                         let lut_to_sort = LUT::from_vec_of_lwe(chunk1, self, ctx);
+                        print!("lut_to_sort : ");
+                        lut_to_sort.print(private_key, ctx);
                         let lut_other = LUT::from_vec_of_lwe(chunk2, self, ctx);
+                        print!("lut_other : ");
+                        lut_other.print(private_key, ctx);
                         let luts = vec![&lut_to_sort, &lut_other];
                         // let start = Instant::now();
                         let sorted_luts = self.many_blind_counting_sort_k(
@@ -1509,6 +1539,8 @@ impl PublicKey {
                             ctx,
                             chunk1.len().min(chunk2.len()),
                         );
+                        print!("sorted lut : ");
+                        sorted_luts[0].print(private_key, ctx);
                         // println!("{:?}", Instant::now() - start);
 
                         // Ajoutez les résultats dans les vecteurs protégés
@@ -1855,23 +1887,11 @@ impl LUT {
     }
 
     pub fn print(&self, private_key: &PrivateKey, ctx: &Context) {
-        let box_size = ctx.polynomial_size().0 / ctx.message_modulus().0;
-
-        // let half_box_size = box_size / 2;
-
-        // Create the accumulator
         let mut input_vec = Vec::new();
-        let mut ct_big = LweCiphertext::new(
-            0_64,
-            ctx.big_lwe_dimension().to_lwe_size(),
-            ctx.ciphertext_modulus(),
-        );
 
         for i in 0..ctx.message_modulus().0 {
-            //many_lwe.len()
-            let index = i * box_size;
-            extract_lwe_sample_from_glwe_ciphertext(&self.0, &mut ct_big, MonomialDegree(index));
-            input_vec.push(private_key.decrypt_lwe_big_key(&ct_big, &ctx));
+            let lwe = private_key.public_key.sample_extract(&self, i, ctx);
+            input_vec.push(private_key.decrypt_lwe(&lwe, &ctx));
         }
         println!("{:?}", input_vec);
     }
@@ -2072,7 +2092,7 @@ mod test {
 
     use itertools::Itertools;
     use quickcheck::TestResult;
-    use tfhe::shortint::parameters::*;
+    use tfhe::shortint::{backward_compatibility::public_key, parameters::*};
 
     use super::*;
 
@@ -2864,18 +2884,24 @@ mod test {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let mut array = vec![10u64; 269];
-        array[1] = 1;
-        array[10] = 2;
-        array[15] = 3;
-        array[20] = 4;
+        // let mut array = vec![10u64; 10];
+        // array[1] = 1;
+        // array[10] = 2;
+        // array[15] = 3;
+        // array[20] = 4;
+        // let array = vec![14, 1, 4, 9, 2, 6, 2, 4, 3, 1];
 
-        let lwes1: Vec<LWE> = array
-            .iter()
-            .map(|i| private_key.allocate_and_encrypt_lwe(*i, &mut ctx))
-            .collect();
+        let lwes1 = public_key.deserialize_lwe_vector_from_file(
+            "/Users/sofianeazogagh/Desktop/revoLUT/distances.json",
+        );
+        let decrypted_lwes1 = private_key.decrypt_lwe_vector(&lwes1, &ctx);
+        println!("decrypted_lwes1: {:?}", decrypted_lwes1);
 
-        let lwes2: Vec<LWE> = (0..array.len() - 1)
+        // let lwes1: Vec<LWE> = array
+        //     .iter()
+        //     .map(|i| private_key.allocate_and_encrypt_lwe(*i, &mut ctx))
+        //     .collect();
+        let lwes2: Vec<LWE> = (0..lwes1.len())
             .map(|i| private_key.allocate_and_encrypt_lwe(i as u64, &mut ctx))
             .collect();
 
