@@ -937,8 +937,8 @@ impl PublicKey {
         self.blind_array_access(&line, &accumulator_final, ctx)
     }
 
-    // Prototype not working as expected (the result is 2 times the expected result)
-    pub fn blind_matrix_access_multi_values_opt(
+    // Prototype not working as expected
+    pub fn blind_matrix_access_mv(
         &self,
         matrix: &Vec<Vec<u64>>,
         lwe_line: LWE,
@@ -995,7 +995,10 @@ impl PublicKey {
         let lut_col = LUT::from_vec_of_lwe(&columns_lwe, self, ctx);
 
         // Effectuer une rotation aveugle sur la LUT colonne
-        let result = self.blind_array_access(&lwe_line, &lut_col, ctx);
+        let mut result = self.blind_array_access(&lwe_line, &lut_col, ctx);
+
+        // Diviser par 2 le mask et le body du resultat
+        result.as_mut().iter_mut().for_each(|x| *x /= 2);
         let elapsed = Instant::now() - start_bma_mv;
         print!("bma_mv ({:?}): ", elapsed);
 
@@ -2628,8 +2631,7 @@ mod test {
         let lwe_line = private_key.allocate_and_encrypt_lwe(line, &mut ctx);
 
         // Appeler la fonction bma_mv
-        let result = public_key
-            .blind_matrix_access_multi_values_opt(&matrix, lwe_line, lwe_column, &mut ctx);
+        let result = public_key.blind_matrix_access_mv(&matrix, lwe_line, lwe_column, &mut ctx);
 
         let result_decrypted = private_key.decrypt_lwe(&result, &ctx);
         println!(
