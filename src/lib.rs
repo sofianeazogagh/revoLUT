@@ -662,6 +662,24 @@ impl PublicKey {
         }
     }
 
+    pub fn lwe_half(
+        &self,
+        lwe: &LweCiphertext<Vec<u64>>,
+        ctx: &Context,
+    ) -> LweCiphertext<Vec<u64>> {
+        let mut result_lwe = LweCiphertext::new(
+            0_u64,
+            ctx.small_lwe_dimension().to_lwe_size(),
+            ctx.ciphertext_modulus(),
+        );
+        result_lwe
+            .as_mut()
+            .iter_mut()
+            .zip(lwe.as_ref().iter())
+            .for_each(|(dst, &lhs)| *dst = lhs >> 1);
+        return result_lwe;
+    }
+
     pub fn neg_lwe(&self, lwe: &LweCiphertext<Vec<u64>>, ctx: &Context) -> LweCiphertext<Vec<u64>> {
         let mut neg_lwe = LweCiphertext::new(
             0_u64,
@@ -1076,7 +1094,6 @@ impl PublicKey {
             columns_lwe.push(ct);
         }
 
-        // Packer les LUTs
         let lut_col = LUT::from_vec_of_lwe(&columns_lwe, self, ctx);
 
         // Effectuer une rotation aveugle sur la LUT colonne
@@ -1084,7 +1101,7 @@ impl PublicKey {
         let elapsed = Instant::now() - start_bma_mv;
         print!("bma_mv ({:?}): ", elapsed);
 
-        return result;
+        return self.lwe_half(&result, ctx);
     }
 
     /// Insert an `element` in a `lut` at `index` and return the modified lut (très très sensible et pas très robuste...)
@@ -2652,43 +2669,30 @@ mod test {
     #[test]
     fn test_mv() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let p = ctx.full_message_modulus() as u64;
-
-        // Matrice de test pour la vérification
-        // let matrix: Vec<Vec<u64>> = vec![
-        //     vec![0, 1, 2, 3],
-        //     vec![1, 2, 3, 0],
-        //     vec![2, 3, 0, 1],
-        //     vec![3, 0, 1, 2],
-        // ];
-
-        let n = ctx.full_message_modulus() as u64;
-        let mut matrix: Vec<Vec<u64>> = Vec::with_capacity(ctx.full_message_modulus());
-        for _i in 0..ctx.full_message_modulus() {
-            matrix.push((0..n).collect());
+        let n = ctx.full_message_modulus();
+        let matrix = vec![Vec::from_iter(0..n as u64); n];
+        for line in &matrix {
+            println!("{:?}", line);
         }
 
-        // Ligne et colonne à utiliser pour la vérification
-        let line = 0;
-        let column = 0;
-
-        // Chiffrer les indices de la colonne et de la ligne
-        let lwe_column = private_key.allocate_and_encrypt_lwe(column, &mut ctx);
-        let lwe_line = private_key.allocate_and_encrypt_lwe(line, &mut ctx);
-
         // Appeler la fonction bma_mv
-        let result = public_key
-            .blind_matrix_access_multi_values_opt(&matrix, lwe_line, lwe_column, &mut ctx);
-
-        let result_decrypted = private_key.decrypt_lwe(&result, &ctx);
-        println!(
-            "expected : {}, got : {}, ",
-            2 * (matrix[line as usize][column as usize]) % p,
-            result_decrypted
-        );
+        for lin in 0..n {
+            for col in 0..n {
+                let lwe_line = private_key.allocate_and_encrypt_lwe(lin as u64, &mut ctx);
+                let lwe_column = private_key.allocate_and_encrypt_lwe(col as u64, &mut ctx);
+                let result = public_key
+                    .blind_matrix_access_multi_values_opt(&matrix, lwe_line, lwe_column, &mut ctx);
+                let result_decrypted = private_key.decrypt_lwe(&result, &ctx);
+                println!(
+                    "{}, {}, expected {}, got {}",
+                    lin, col, matrix[lin][col], result_decrypted
+                );
+                assert_eq!(result_decrypted, matrix[lin][col]);
+            }
+        }
     }
 
     #[test]
