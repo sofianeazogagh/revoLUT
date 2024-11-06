@@ -47,7 +47,7 @@ pub fn key(param: ClassicPBSParameters) -> &'static PrivateKey {
     KEYS.get_or_init(|| Vec::from_iter((0..9).map(|_| OnceLock::new())))[bitsize].get_or_init(
         || {
             PrivateKey::from_file(&format!("PrivateKey{}", bitsize))
-                .unwrap_or(PrivateKey::to_file(&mut Context::from(param)))
+                .unwrap_or_else(|| PrivateKey::to_file(&mut Context::from(param)))
         },
     )
 }
@@ -120,6 +120,7 @@ impl Context {
         let full_message_modulus = parameters.message_modulus.0 * parameters.carry_modulus.0;
         let delta = (1u64 << 63) / (full_message_modulus) as u64;
 
+        //FIXME : voir a quoi correspond le +1
         let signed_decomposer = SignedDecomposer::new(
             DecompositionBaseLog(full_message_modulus.ilog2() as usize + 1),
             DecompositionLevelCount(1),
@@ -229,7 +230,7 @@ impl Context {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PrivateKey {
     small_lwe_sk: LweSecretKey<Vec<u64>>,
-    big_lwe_sk: LweSecretKey<Vec<u64>>,
+    // big_lwe_sk: LweSecretKey<Vec<u64>>,
     glwe_sk: GlweSecretKey<Vec<u64>>,
     pub public_key: PublicKey,
 }
@@ -249,7 +250,7 @@ impl PrivateKey {
         );
 
         // Create a copy of the GlweSecretKey re-interpreted as an LweSecretKey
-        let big_lwe_sk = glwe_sk.clone().into_lwe_secret_key();
+        // let big_lwe_sk = glwe_sk.clone().into_lwe_secret_key();
 
         // Generate the bootstrapping key, we use the parallel variant for performance reason
         let std_bootstrapping_key = par_allocate_and_generate_new_lwe_bootstrap_key(
@@ -287,7 +288,7 @@ impl PrivateKey {
         );
 
         generate_lwe_keyswitch_key(
-            &big_lwe_sk,
+            &glwe_sk.as_lwe_secret_key(),
             &small_lwe_sk,
             &mut lwe_ksk,
             ctx.parameters.lwe_noise_distribution,
@@ -296,6 +297,7 @@ impl PrivateKey {
 
         // Create Packing Key Switch
 
+        // FIXME : changer small_lwe_dimension to big_lwe_dimension
         let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
             0,
             ctx.pfks_base_log(),
@@ -313,6 +315,7 @@ impl PrivateKey {
         // last_polynomial[0] = u64::MAX;
         last_polynomial[0] = 1_u64;
         // Generate the LWE private functional packing keyswitch key
+        // FIXME : changer small_lwe_dimension to big_lwe_dimension
         par_generate_lwe_private_functional_packing_keyswitch_key(
             &small_lwe_sk,
             &glwe_sk,
@@ -324,7 +327,7 @@ impl PrivateKey {
         );
 
         let cbs_pfpksk = par_allocate_and_generate_new_circuit_bootstrap_lwe_pfpksk_list(
-            &big_lwe_sk,
+            &glwe_sk.as_lwe_secret_key(),
             &glwe_sk,
             ctx.pfks_base_log(),
             ctx.pfks_level(),
@@ -342,7 +345,7 @@ impl PrivateKey {
 
         PrivateKey {
             small_lwe_sk,
-            big_lwe_sk,
+            // big_lwe_sk,
             glwe_sk,
             public_key,
         }
@@ -370,8 +373,10 @@ impl PrivateKey {
     pub fn get_small_lwe_sk(&self) -> &LweSecretKey<Vec<u64>> {
         &self.small_lwe_sk
     }
-    pub fn get_big_lwe_sk(&self) -> &LweSecretKey<Vec<u64>> {
-        &self.big_lwe_sk
+
+    // TODO : see if this is correct
+    pub fn get_big_lwe_sk(&self) -> LweSecretKey<&[u64]> {
+        self.glwe_sk.as_lwe_secret_key()
     }
     pub fn get_glwe_sk(&self) -> &GlweSecretKey<Vec<u64>> {
         &self.glwe_sk
@@ -380,6 +385,7 @@ impl PrivateKey {
         &self.public_key
     }
 
+    // FIXME : renommer en allocate_and_encrypt_lwe_small_key
     pub fn allocate_and_encrypt_lwe(&self, input: u64, ctx: &mut Context) -> LWE {
         let plaintext = Plaintext(ctx.delta().wrapping_mul(input));
 
@@ -399,7 +405,7 @@ impl PrivateKey {
 
         // Allocate a new LweCiphertext and encrypt our plaintext
         let lwe_ciphertext: LweCiphertextOwned<u64> = allocate_and_encrypt_new_lwe_ciphertext(
-            &self.big_lwe_sk,
+            &self.glwe_sk.as_lwe_secret_key(),
             plaintext,
             ctx.parameters.lwe_noise_distribution,
             ctx.ciphertext_modulus(),
@@ -408,6 +414,7 @@ impl PrivateKey {
         lwe_ciphertext
     }
 
+    // FIXME : changer small_lwe_dimension to big_lwe_dimension
     pub fn allocate_and_trivially_encrypt_lwe(&self, input: u64, ctx: &Context) -> LWE {
         let plaintext = Plaintext(ctx.delta().wrapping_mul(input));
         // Allocate a new LweCiphertext and encrypt trivially our plaintext
@@ -430,7 +437,8 @@ impl PrivateKey {
 
     pub fn decrypt_lwe_big_key(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
         // Decrypt the PBS multiplication result
-        let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.big_lwe_sk, &ciphertext);
+        let plaintext: Plaintext<u64> =
+            decrypt_lwe_ciphertext(&self.glwe_sk.as_lwe_secret_key(), &ciphertext);
         let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta()
             % ctx.full_message_modulus() as u64;
         result
@@ -1322,6 +1330,8 @@ impl PublicKey {
             ctx.ciphertext_modulus,
         );
         extract_lwe_sample_from_glwe_ciphertext(&lut.0, &mut lwe, MonomialDegree(i * ctx.box_size));
+
+        // FIXME : delete the keyswitch
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
 
@@ -1334,17 +1344,21 @@ impl PublicKey {
         );
         extract_lwe_sample_from_glwe_ciphertext(&glwe, &mut lwe, MonomialDegree(i));
 
+        // FIXME : delete the keyswitch
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
 
     /// run f(ct_input), assuming lut was constructed with LUT::from_function(f)
     pub fn run_lut(&self, ct_input: &LWE, lut: &LUT, ctx: &Context) -> LWE {
+        // FIXME : keyswitch
         let mut lwe = LweCiphertext::new(
             0u64,
             ctx.big_lwe_dimension.to_lwe_size(),
             ctx.ciphertext_modulus,
         );
         programmable_bootstrap_lwe_ciphertext(&ct_input, &mut lwe, &lut.0, &self.fourier_bsk);
+
+        // FIXME : delete the keyswitch
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
 
@@ -1353,6 +1367,8 @@ impl PublicKey {
     pub fn blind_array_inject(&self, lut: &mut LUT, i: &LWE, x: &LWE, ctx: &Context) {
         let mut other = LUT::from_lwe(&x, &self, ctx);
         let neg_i = self.neg_lwe(&i, ctx);
+
+        // FIXME : keyswitch
         blind_rotate_assign(&neg_i, &mut other.0, &self.fourier_bsk);
         self.glwe_sum_assign(&mut lut.0, &other.0);
     }
@@ -1915,6 +1931,14 @@ mod test {
     use tfhe::shortint::parameters::*;
 
     use super::*;
+
+    #[test]
+    fn test_gen_key() {
+        let start_time = Instant::now();
+        let private_key = key(PARAM_MESSAGE_6_CARRY_0);
+        let elapsed = Instant::now() - start_time;
+        println!("Time taken to generate key: {:?}", elapsed);
+    }
 
     #[test]
     fn test_lwe_enc() {
