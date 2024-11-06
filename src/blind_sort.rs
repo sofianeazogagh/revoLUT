@@ -112,6 +112,7 @@ impl crate::PublicKey {
         let mut count = LUT::from_vec_trivially(&vec![0; n], ctx);
         let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
         let minus_one = self.allocate_and_trivially_encrypt_lwe(2 * n as u64 - 1, ctx);
+        let id = LUT::from_function(|x| x, ctx);
 
         // step 1: count values
         for i in 0..k {
@@ -121,7 +122,11 @@ impl crate::PublicKey {
 
         // step 2: build prefix sum
         for i in 1..n {
-            let c = self.sample_extract(&count, i - 1, ctx);
+            let mut c = self.sample_extract(&count, i - 1, ctx);
+            if i % (n / 4) == 0 {
+                // refresh noise, assuming an addition budget
+                c = self.blind_array_access(&c, &id, &ctx);
+            }
             let j = self.allocate_and_trivially_encrypt_lwe(i as u64, ctx);
             self.blind_array_inject(&mut count, &j, &c, ctx);
         }
