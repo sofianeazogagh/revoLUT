@@ -629,12 +629,25 @@ pub struct PublicKey {
 }
 
 impl PublicKey {
+    pub fn lwe_half(&self, lwe: &LWE, ctx: &Context) -> LWE {
+        let mut result_lwe = LweCiphertext::new(
+            0_u64,
+            ctx.small_lwe_dimension().to_lwe_size(),
+            ctx.ciphertext_modulus(),
+        );
+        result_lwe
+            .as_mut()
+            .iter_mut()
+            .zip(lwe.as_ref().iter())
+            .for_each(|(dst, &lhs)| *dst = lhs >> 1);
+        return result_lwe;
+    }
+
     pub fn wrapping_neg_lwe(&self, lwe: &mut LWE) {
         for ai in lwe.as_mut() {
             *ai = (*ai).wrapping_neg();
         }
     }
-
 
     pub fn neg_lwe(&self, lwe: &LWE, ctx: &Context) -> LWE {
         let mut neg_lwe = LweCiphertext::new(
@@ -2449,8 +2462,8 @@ mod test {
             for col in 0..n {
                 let lwe_line = private_key.allocate_and_encrypt_lwe(lin as u64, &mut ctx);
                 let lwe_column = private_key.allocate_and_encrypt_lwe(col as u64, &mut ctx);
-                let result = public_key
-                    .blind_matrix_access_mv(&matrix, lwe_line, lwe_column, &mut ctx);
+                let result =
+                    public_key.blind_matrix_access_mv(&matrix, lwe_line, lwe_column, &mut ctx);
                 let result_decrypted = private_key.decrypt_lwe(&result, &ctx);
                 println!(
                     "{}, {}, expected {}, got {}",
