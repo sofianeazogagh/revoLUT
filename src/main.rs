@@ -9,7 +9,8 @@ use tfhe::shortint::parameters::*;
 // mod uni_test;
 // use uni_test::*;
 
-mod performance_test;
+// mod performance_test;
+// use performance_test::*;
 
 pub fn generate_keys() {
     println!("generating keys and saving them to disk");
@@ -52,17 +53,4 @@ pub fn main() {
         println!("{:?}", std::time::Instant::now() - now);
         sorted_lut.print(&private_key, &ctx);
     }
-
-    // let path = "./exports/packing_lwe_to_glwe_full.csv";
-    // test_primitives(Some("packing_lwe_to_glwe"), path);
-
-    // let path = "./exports/packing_one_lwe_to_glwe.csv";
-    // test_primitives(Some("packing_one_lwe_to_glwe"), path);
-
-    // show_performance(
-    //     "./exports/benchmark_results.csv", // Nom du fichier CSV
-    //     "packing_lwe_to_glwe",             // Nom de la primitive à rechercher
-    //     "PARAM_MESSAGE_4_CARRY_0",         // Paramètre à rechercher
-    //     "xLWE",                            // Variante à rechercher
-    // )
 }
