@@ -395,6 +395,40 @@ impl PrivateKey {
         lwe_ciphertext
     }
 
+    // TODO : change this function to take the modulus as a parameter instead of delta
+    // pub fn allocate_and_encrypt_lwe_with_delta(
+    //     &self,
+    //     input: u64,
+    //     delta: u64,
+    //     ctx: &mut Context,
+    // ) -> LWE {
+    //     let plaintext = Plaintext(delta.wrapping_mul(input));
+
+    //     // Allocate a new LweCiphertext and encrypt our plaintext
+    //     let lwe_ciphertext: LweCiphertextOwned<u64> = allocate_and_encrypt_new_lwe_ciphertext(
+    //         &self.small_lwe_sk,
+    //         plaintext,
+    //         ctx.parameters.lwe_noise_distribution,
+    //         ctx.ciphertext_modulus(),
+    //         &mut ctx.encryption_generator,
+    //     );
+    //     lwe_ciphertext
+    // }
+
+    pub fn lwe_encrypt_with_modulus(&self, x: u64, modulus: u64, ctx: &mut Context) -> LWE {
+        // we still consider the padding bit
+        let delta = (1u64 << 63) / modulus;
+        let pt = Plaintext(x * delta);
+        let lwe_ciphertext = allocate_and_encrypt_new_lwe_ciphertext(
+            &self.small_lwe_sk,
+            pt,
+            ctx.parameters.lwe_noise_distribution,
+            ctx.ciphertext_modulus(),
+            &mut ctx.encryption_generator,
+        );
+        lwe_ciphertext
+    }
+
     pub fn allocate_and_encrypt_lwe_big_key(&self, input: u64, ctx: &mut Context) -> LWE {
         let plaintext = Plaintext(ctx.delta().wrapping_mul(input));
 
@@ -421,10 +455,28 @@ impl PrivateKey {
         lwe_ciphertext
     }
 
+    pub fn decrypt_without_decoding(&self, ciphertext: &LWE) -> Plaintext<u64> {
+        decrypt_lwe_ciphertext(&self.small_lwe_sk, &ciphertext)
+    }
+
     pub fn decrypt_lwe(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
         // Decrypt the PBS multiplication result
         let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.small_lwe_sk, &ciphertext);
-        let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta()
+        let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
+        result % ctx.full_message_modulus() as u64
+    }
+
+    pub fn decrypt_lwe_without_mod(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
+        // Decrypt the PBS multiplication result
+        let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.small_lwe_sk, &ciphertext);
+        let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
+        result
+    }
+
+    pub fn decrypt_lwe_delta(&self, ciphertext: &LWE, delta: u64, ctx: &Context) -> u64 {
+        // Decrypt the PBS multiplication result
+        let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.small_lwe_sk, &ciphertext);
+        let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / delta
             % ctx.full_message_modulus() as u64;
         result
     }
@@ -433,6 +485,26 @@ impl PrivateKey {
         ciphertext
             .iter()
             .map(|ct| self.decrypt_lwe(ct, ctx))
+            .collect()
+    }
+
+    pub fn decrypt_lwe_vector_without_mod(&self, ciphertext: &Vec<LWE>, ctx: &Context) -> Vec<u64> {
+        ciphertext
+            .iter()
+            .map(|ct| self.decrypt_lwe_without_mod(ct, ctx))
+            .collect()
+    }
+
+    // TODO : rename this function
+    pub fn decrypt_lwe_vector_without_mod_delta(
+        &self,
+        ciphertext: &Vec<LWE>,
+        delta: u64,
+        ctx: &Context,
+    ) -> Vec<u64> {
+        ciphertext
+            .iter()
+            .map(|ct| self.decrypt_lwe_delta(ct, delta, ctx))
             .collect()
     }
 
@@ -496,12 +568,51 @@ impl PrivateKey {
     }
 
     pub fn allocate_and_encrypt_glwe_from_vec(&self, vec: &Vec<u64>, ctx: &mut Context) -> GLWE {
+        let encoded_vec = self.encode_glwe_plaintext_from_vec(vec, ctx);
+        let output_glwe = self.allocate_and_encrypt_glwe(encoded_vec, ctx);
+        output_glwe
+    }
+
+    pub fn encode_glwe_plaintext_from_vec(
+        &self,
+        vec: &Vec<u64>,
+        ctx: &Context,
+    ) -> PlaintextList<Vec<u64>> {
         let mut encoded_vec: Vec<u64> = vec.iter().map(|x| x * ctx.delta()).collect();
         if encoded_vec.len() < ctx.polynomial_size().0 {
             encoded_vec.resize(ctx.polynomial_size().0, 0_u64);
         }
-        let output_glwe =
-            self.allocate_and_encrypt_glwe(PlaintextList::from_container(encoded_vec), ctx);
+        PlaintextList::from_container(encoded_vec)
+    }
+
+    // // TODO : rename this function
+    // pub fn encode_glwe_plaintext_from_vec_with_modulus(
+    //     &self,
+    //     vec: &Vec<u64>,
+    //     modulus: u64,
+    //     ctx: &Context,
+    // ) -> PlaintextList<Vec<u64>> {
+    //     let mut encoded_vec: Vec<u64> = vec.iter().map(|x| x * delta).collect();
+    //     if encoded_vec.len() < ctx.polynomial_size().0 {
+    //         encoded_vec.resize(ctx.polynomial_size().0, 0_u64);
+    //     }
+    //     PlaintextList::from_container(encoded_vec)
+    // }
+
+    // TODO : rename this function
+    pub fn allocate_and_encrypt_glwe_with_modulus(
+        &self,
+        vec: &Vec<u64>,
+        modulus: u64,
+        ctx: &mut Context,
+    ) -> GLWE {
+        let delta = (1 << 63) / modulus;
+        let mut encoded_vec: Vec<u64> = vec.iter().map(|x| x * delta).collect();
+        if encoded_vec.len() < ctx.polynomial_size().0 {
+            encoded_vec.resize(ctx.polynomial_size().0, 0_u64);
+        }
+        let pt = PlaintextList::from_container(encoded_vec);
+        let output_glwe = self.allocate_and_encrypt_glwe(pt, ctx);
         output_glwe
     }
 
@@ -557,6 +668,15 @@ impl PrivateKey {
         let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
         println!("{} {}", string, result);
     }
+
+    pub fn debug_lwe_delta(&self, string: &str, ciphertext: &LWE, delta: u64, ctx: &Context) {
+        // Decrypt the PBS multiplication result
+        let plaintext: Plaintext<u64> =
+            decrypt_lwe_ciphertext(&self.get_small_lwe_sk(), &ciphertext);
+        let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / delta;
+        println!("{} {}", string, result);
+    }
+
     pub fn debug_big_lwe(&self, string: &str, ciphertext: &LWE, ctx: &Context) {
         // Decrypt the PBS multiplication result
         let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext);
@@ -580,14 +700,74 @@ impl PrivateKey {
         println!("{} {:?}", string, decoded);
     }
 
+    pub fn debug_glwe_without_reduction(
+        &self,
+        string: &str,
+        input_glwe: &GLWE,
+        ctx: &Context,
+        index: usize,
+    ) {
+        let mut plaintext_res = PlaintextList::new(0, PlaintextCount(ctx.polynomial_size().0));
+        decrypt_glwe_ciphertext(&self.get_glwe_sk(), &input_glwe, &mut plaintext_res);
+
+        // To round our bits of message
+        let decoded: Vec<_> = plaintext_res
+            .iter()
+            .map(|x| (ctx.signed_decomposer.closest_representable(*x.0) / ctx.delta()))
+            .collect();
+
+        println!("{} {:?}", string, decoded[index]);
+    }
+
     pub fn lwe_noise(&self, ct: &LWE, expected_plaintext: u64, ctx: &Context) -> f64 {
         // plaintext = b - a*s = Delta*m + e
-        let mut plaintext = decrypt_lwe_ciphertext(&self.small_lwe_sk, &ct);
-
-        // plaintext = plaintext - Delta*m = e
+        let mut plaintext = decrypt_lwe_ciphertext(&self.small_lwe_sk, &ct); // decryption from tfhe
+                                                                             // plaintext = plaintext - Delta*m = e
+        println!("plaintext={:?}", plaintext.0 / ctx.delta());
         plaintext.0 = plaintext.0.wrapping_sub(ctx.delta() * expected_plaintext);
 
+        println!("expected_plaintext={:?}", expected_plaintext);
+
         ((plaintext.0 as i64).abs() as f64).log2()
+    }
+
+    pub fn lwe_noise_big_sk(&self, ct: &LWE, expected_plaintext: u64, ctx: &Context) -> f64 {
+        // plaintext = b - a*s = Delta*m + e
+        let mut plaintext = decrypt_lwe_ciphertext(&self.big_lwe_sk, &ct);
+        // plaintext = plaintext - Delta*m = e
+        println!("plaintext={:?}", plaintext.0 / ctx.delta());
+        plaintext.0 = plaintext.0.wrapping_sub(ctx.delta() * expected_plaintext);
+
+        println!("expected_plaintext={:?}", expected_plaintext);
+
+        ((plaintext.0 as i64).abs() as f64).log2()
+    }
+
+    pub fn lwe_noise_delta(
+        &self,
+        ct: &LWE,
+        expected_plaintext: u64,
+        delta: u64,
+        ctx: &Context,
+    ) -> f64 {
+        // plaintext = b - a*s = Delta*m + e
+        let plaintext = decrypt_lwe_ciphertext(&self.small_lwe_sk, &ct);
+
+        // res = Round[(plaintext / delta)] % full_message_modulus = m
+        let res: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / delta
+            % ctx.full_message_modulus() as u64;
+
+        // noise = plaintext - Delta*m = e
+        let noise = plaintext.0.wrapping_sub(delta * expected_plaintext);
+
+        println!("plaintext reduced : {:?}", res);
+        println!("expected_plaintext : {:?}", expected_plaintext);
+
+        if (noise as u64) >= (delta / 2) {
+            println!("Noise exceeds acceptable threshold.");
+        }
+
+        ((noise as i64).abs() as f64).log2()
     }
 
     pub fn encrypt_matrix(&self, mut ctx: &mut Context, matrix: &Vec<Vec<u64>>) -> Vec<LUT> {
@@ -655,6 +835,22 @@ impl PublicKey {
             .zip(lwe.as_ref().iter())
             .for_each(|(dst, &lhs)| *dst = lhs.wrapping_neg());
         return neg_lwe;
+    }
+
+    /// Reduce the plaintext modulus in `ct` from `big_modulus` to `message_modulus`.
+    pub fn lower_precision(&self, ct: &mut LWE, ctx: &Context, big_modulus: u64) {
+        let small_delta = (1 << 63) / big_modulus;
+
+        let small_modulus = ctx.message_modulus().0 as u64;
+        let precision_ratio = (1 << 63) / (small_delta * small_modulus);
+        assert!(precision_ratio > 1);
+
+        let shift = Plaintext(((small_delta * (precision_ratio - 1)) / 2).wrapping_neg());
+        lwe_ciphertext_plaintext_add_assign(ct, shift);
+
+        // Bootstrap
+        let identity = LUT::from_function(|x| x % ctx.message_modulus().0 as u64, ctx);
+        self.run_lut(&ct, &identity, ctx);
     }
 
     pub fn allocate_and_trivially_encrypt_lwe(&self, input: u64, ctx: &Context) -> LWE {
@@ -1354,6 +1550,10 @@ impl PublicKey {
         self.allocate_and_keyswitch_lwe_ciphertext(lwe, ctx)
     }
 
+    pub fn bootstrap_lwe(&self, ct_input: &LWE, ctx: &Context) -> LWE {
+        let identity = LUT::from_function(|x| x % ctx.full_message_modulus() as u64, ctx);
+        self.run_lut(ct_input, &identity, ctx)
+    }
     /// blindly adds x to the i-th box of the given LUT
     /// this process is noisy and the LUT needs bootstrapping before being read
     pub fn blind_array_inject(&self, lut: &mut LUT, i: &LWE, x: &LWE, ctx: &Context) {
@@ -1492,6 +1692,7 @@ impl PublicKey {
         self.blind_topk_many_lut(&result, k, ctx)
     }
 
+    // TODO : a generalisé pour m vecteurs de lwe (pour l'instant m=2)
     pub fn blind_topk_many_lut_par(
         &self,
         many_lwes: &Vec<Vec<LWE>>, // slice of slices
@@ -1511,10 +1712,6 @@ impl PublicKey {
         // Utilisez Mutex pour permettre un accès concurrent sécurisé aux résultats
         let result1 = Mutex::new(vec![]);
         let result2 = Mutex::new(vec![]);
-        let private_key = key(ctx.parameters());
-
-        let many_lwes_decrypted = private_key.decrypt_lwe_vector(&many_lwes[0], ctx);
-        println!("many_lwes_decrypted: {:?}", many_lwes_decrypted);
 
         // Utilisez le pool de threads pour paralléliser l'itération
         pool.scope(|s| {
@@ -1527,20 +1724,10 @@ impl PublicKey {
                     .for_each(|(_, (chunk1, chunk2))| {
                         assert!(chunk1.len() <= n);
                         let lut_to_sort = LUT::from_vec_of_lwe(chunk1, self, ctx);
-                        print!("lut_to_sort : ");
-                        lut_to_sort.print(private_key, ctx);
                         let lut_other = LUT::from_vec_of_lwe(chunk2, self, ctx);
-                        print!("lut_other : ");
-                        lut_other.print(private_key, ctx);
                         let luts = vec![&lut_to_sort, &lut_other];
                         // let start = Instant::now();
-                        let sorted_luts = self.many_blind_counting_sort_k(
-                            &luts,
-                            ctx,
-                            chunk1.len().min(chunk2.len()),
-                        );
-                        print!("sorted lut : ");
-                        sorted_luts[0].print(private_key, ctx);
+                        let sorted_luts = self.many_blind_counting_sort_k(&luts, ctx, chunk1.len());
                         // println!("{:?}", Instant::now() - start);
 
                         // Ajoutez les résultats dans les vecteurs protégés
@@ -1556,12 +1743,12 @@ impl PublicKey {
                                 .map(|i| self.sample_extract(&sorted_luts[1], i, ctx)),
                         );
                     });
-            });
+            })
         });
 
         let result = vec![result1.into_inner().unwrap(), result2.into_inner().unwrap()];
         assert!(result.len() < many_lwes[0].len());
-
+        // TODO : appel récursif a la version parallele
         // Appel récursif en style tournoi
         self.blind_topk_many_lut(&result, k, ctx)
     }
@@ -1672,6 +1859,43 @@ impl LUT {
             accumulator_u64[index..index + box_size]
                 .iter_mut()
                 .for_each(|a| *a = f(i as u64) * ctx.delta());
+        }
+
+        let half_box_size = box_size / 2;
+
+        // Negate the first half_box_size coefficients to manage negacyclicity and rotate
+        for a_i in accumulator_u64[0..half_box_size].iter_mut() {
+            *a_i = (*a_i).wrapping_neg();
+        }
+
+        // Rotate the accumulator
+        accumulator_u64.rotate_left(half_box_size);
+
+        let accumulator_plaintext = PlaintextList::from_container(accumulator_u64);
+
+        let accumulator = allocate_and_trivially_encrypt_new_glwe_ciphertext(
+            ctx.glwe_dimension().to_glwe_size(),
+            &accumulator_plaintext,
+            ctx.ciphertext_modulus(),
+        );
+
+        LUT(accumulator)
+    }
+
+    pub fn from_function_and_delta<F>(f: F, delta: u64, ctx: &Context) -> LUT
+    where
+        F: Fn(u64) -> u64,
+    {
+        let box_size = ctx.box_size();
+        // Create the accumulator
+        let mut accumulator_u64 = vec![0_u64; ctx.polynomial_size().0];
+
+        // Fill each box with the encoded denoised value
+        for i in 0..ctx.full_message_modulus() {
+            let index = i * box_size;
+            accumulator_u64[index..index + box_size]
+                .iter_mut()
+                .for_each(|a| *a = f(i as u64) * delta);
         }
 
         let half_box_size = box_size / 2;
@@ -2097,16 +2321,69 @@ mod test {
     use super::*;
 
     #[test]
+    fn test_bootstrap() {
+        let param = PARAM_MESSAGE_4_CARRY_0;
+        let mut ctx = Context::from(param);
+        let private_key = key(param);
+        let public_key = &private_key.public_key;
+
+        let input = 0;
+        let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
+        let mut expected = (input) % ctx.message_modulus().0 as u64; // 2
+        for i in 1..3 * ctx.full_message_modulus() {
+            let new_lwe = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
+            lwe_ciphertext_add_assign(&mut lwe, &new_lwe);
+            // lwe = public_key.lwe_ciphertext_plaintext_add(&mut lwe, 1, &ctx); // 2 + i
+            expected = (expected + 1) % ctx.message_modulus().0 as u64; // 2 + i
+            println!("--------------------------------");
+            println!(
+                "noise after {}-th incrementation = {}",
+                i,
+                private_key.lwe_noise_delta(&lwe.clone(), expected, ctx.delta(), &ctx)
+            );
+            if i == ctx.full_message_modulus() + 1 {
+                println!("------------Bootstrap------------");
+                lwe = public_key.bootstrap_lwe(&lwe, &ctx);
+
+                println!("--------------------------------");
+            }
+            private_key.debug_lwe("lwe decrypted", &lwe, &ctx);
+            println!("expected: {}", expected);
+        }
+    }
+
+    #[test]
     fn test_lwe_enc() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(PARAM_MESSAGE_4_CARRY_0);
-        let input: u64 = 1;
+        let input: u64 = 35;
         let lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
-        let clear = private_key.decrypt_lwe(&lwe, &mut ctx);
+        let clear = private_key.decrypt_lwe(&lwe, &mut ctx); // decryption with reduction
         println!("Test encryption-decryption");
+        println!("input: {}", input);
+        println!("decrypted: {}", clear);
         assert_eq!(input, clear);
     }
 
+    #[test]
+    fn test_add_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let public_key = &private_key.public_key;
+        let input1: u64 = 16;
+        let input2: u64 = 1;
+        let mut lwe1 = private_key.allocate_and_encrypt_lwe(input1, &mut ctx);
+        let lwe2 = private_key.allocate_and_encrypt_lwe(input2, &mut ctx);
+        lwe_ciphertext_add_assign(&mut lwe1, &lwe2);
+
+        let identity = LUT::from_function(|x| ctx.full_message_modulus() as u64 - x, &ctx);
+        let lwe_identity = public_key.run_lut(&mut lwe1, &identity, &ctx);
+
+        lwe_ciphertext_add_assign(&mut lwe1, &lwe_identity);
+        let plaintext = decrypt_lwe_ciphertext(private_key.get_small_lwe_sk(), &lwe1);
+        let decrypted = plaintext.0 / ctx.delta();
+        println!("decrypted: {}", decrypted);
+    }
     #[test]
     fn test_lut_enc() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
@@ -2322,6 +2599,62 @@ mod test {
     }
 
     #[test]
+    fn test_blind_rotation_time() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let public_key = &private_key.public_key;
+        let array = Vec::from_iter(0..16);
+        let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        let rotation_amount = 1;
+        let mut lwe_rotation_amount =
+            private_key.allocate_and_encrypt_lwe_big_key(rotation_amount, &mut ctx);
+
+        // print the noise of the lwe_rotation_amount
+        println!(
+            "noise of lwe_rotation_amount: {}",
+            private_key.lwe_noise_big_sk(&lwe_rotation_amount, rotation_amount, &ctx)
+        );
+
+        // keyswitch (small sk)
+        let mut switched = LWE::new(
+            0,
+            ctx.small_lwe_dimension().to_lwe_size(),
+            ctx.ciphertext_modulus(),
+        );
+        keyswitch_lwe_ciphertext(&public_key.lwe_ksk, &mut lwe_rotation_amount, &mut switched);
+
+        // print the noise of the switched
+        println!(
+            "noise of switched: {}",
+            private_key.lwe_noise(&switched, rotation_amount, &ctx)
+        );
+
+        // blind rotation
+        lut.print(&private_key, &ctx);
+        let begin = Instant::now();
+        blind_rotate_assign(&lwe_rotation_amount, &mut lut.0, &public_key.fourier_bsk);
+        let elapsed = Instant::now() - begin;
+        println!("rotated ({:?}): ", elapsed);
+        lut.print(&private_key, &ctx);
+
+        // extract the sample from the glwe (under big key)
+        let mut extracted_lwe = LWE::new(
+            0u64,
+            ctx.big_lwe_dimension().to_lwe_size(),
+            ctx.ciphertext_modulus(),
+        );
+        extract_lwe_sample_from_glwe_ciphertext(&lut.0, &mut extracted_lwe, MonomialDegree(0));
+
+        let noise = private_key.lwe_noise_big_sk(&extracted_lwe, rotation_amount, &ctx);
+        println!("noise after sample extract: {:.2}", noise);
+
+        let actual = private_key.decrypt_lwe_big_key(&extracted_lwe, &ctx);
+        let expected = array[rotation_amount as usize];
+        println!(" actual: {}, expected: {}", actual, expected);
+        // assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn test_blind_permutation_sort_itself() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = key(PARAM_MESSAGE_2_CARRY_0);
@@ -2443,7 +2776,7 @@ mod test {
     }
 
     #[test]
-    fn test_bootstrap() {
+    fn test_bootstrap_lut() {
         let ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
@@ -2915,6 +3248,32 @@ mod test {
             println!("vec_lwe");
             for lwe in vec_lwe {
                 println!("{}", private_key.decrypt_lwe(&lwe, &ctx));
+            }
+        }
+    }
+
+    #[test]
+    fn test_blind_counting_sort_noise() {
+        let param = PARAM_MESSAGE_4_CARRY_0;
+        let mut ctx = Context::from(param);
+        let private_key = key(param);
+        let public_key = &private_key.public_key;
+        let array = vec![15, 14];
+
+        for _ in 0..100 {
+            let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+            lut.print(&private_key, &ctx);
+            let begin = Instant::now();
+            let sorted_lut = public_key.blind_counting_sort_k(&lut, &ctx, 2);
+            let elapsed = Instant::now() - begin;
+            sorted_lut.print(&private_key, &ctx);
+            println!("run ({:?})", elapsed);
+
+            let expected_array = vec![14, 15];
+            for i in 0..expected_array.len() {
+                let lwe = public_key.sample_extract(&sorted_lut, i, &ctx);
+                let actual = private_key.decrypt_lwe_without_mod(&lwe, &ctx);
+                assert_eq!(actual, expected_array[i]);
             }
         }
     }

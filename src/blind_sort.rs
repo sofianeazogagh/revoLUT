@@ -3,7 +3,7 @@ use tfhe::core_crypto::{
     entities::LweCiphertext,
 };
 
-use crate::{key, Context, LUT};
+use crate::{key, Context, LUT, LWE};
 
 impl crate::PublicKey {
     /// compares a and b blindly, returning a cipher of 1 if a < b else 0
@@ -115,31 +115,20 @@ impl crate::PublicKey {
 
         let private_key = key(ctx.parameters());
 
-        println!("message modulus : {:?}", ctx.full_message_modulus());
-
-        // private_key.debug_glwe("luts : ", &luts[0].0, ctx);
-
+        // println!("initial :");
+        // luts[0].print(&private_key, ctx);
         // step 1: count values
         for i in 0..k {
-            // private_key.debug_glwe("luts : ", &luts[0].0, ctx);
             let j = self.sample_extract(&luts[0], i, ctx);
-            private_key.debug_lwe("j during counting {} : ", &j, ctx);
+            // private_key.debug_lwe(&format!("j during counting {i} : "), &j, ctx);
             self.blind_array_inject(&mut count, &j, &one, ctx);
-            print!("count during counting {} : ", i);
-            count.print(&private_key, ctx);
         }
-
-        print!("count after counting : ");
-        count.print(&private_key, ctx);
-
         // step 2: build prefix sum
         for i in 1..n {
             let c = self.sample_extract(&count, i - 1, ctx);
             let j = self.allocate_and_trivially_encrypt_lwe(i as u64, ctx);
             self.blind_array_inject(&mut count, &j, &c, ctx);
         }
-        // print!("count after prefix sum : ");
-        // count.print(&private_key, ctx);
 
         // step 3: rebuild sorted list
         let mut results = vec![LUT::from_vec_trivially(&vec![0; n], ctx); m];
@@ -152,7 +141,6 @@ impl crate::PublicKey {
                 self.blind_array_inject(&mut results[j], &c, &e, ctx);
             }
         }
-
         results
     }
 }
