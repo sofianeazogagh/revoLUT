@@ -1669,6 +1669,8 @@ impl LUT {
             let mut lwe = ct.into_container();
             lwe_container.append(&mut lwe);
         }
+
+        // FIXME : change small_lwe_dimension to big_lwe_dimension
         let lwe_ciphertext_list = LweCiphertextList::from_container(
             lwe_container,
             ctx.small_lwe_dimension().to_lwe_size(),
@@ -1706,6 +1708,7 @@ impl LUT {
             &lwe,
         );
 
+        // TODO : change this by simply absorbing the output with [1,..,1,0,..,0]
         // fill the first box in log(box_size) glwe sums
         for i in 0..ctx.box_size().ilog2() {
             let mut other = output.clone();
@@ -1765,7 +1768,6 @@ impl LUT {
         );
 
         for i in 0..ctx.message_modulus().0 {
-            //many_lwe.len()
             let index = i * box_size;
             extract_lwe_sample_from_glwe_ciphertext(&self.0, &mut ct_big, MonomialDegree(index));
             input_vec.push(private_key.decrypt_lwe_big_key(&ct_big, &ctx));
@@ -1787,6 +1789,8 @@ impl LUT {
                 &mut lwe_sample,
                 MonomialDegree((i * ctx.box_size()) as usize),
             );
+
+            // FIXME : delete the keyswitch and return lwe_sample
             let mut switched = LweCiphertext::new(
                 0,
                 ctx.small_lwe_dimension().to_lwe_size(),
@@ -1802,6 +1806,7 @@ impl LUT {
 
         let mut result_retrieve_u64: Vec<u64> = Vec::new();
         for lwe in result_insert {
+            // FIXME : decrypt with big_lwe_sk
             let pt = private_key.decrypt_lwe(&lwe, &ctx);
             result_retrieve_u64.push(pt);
         }
@@ -1821,6 +1826,7 @@ impl LUT {
             .glwe_absorption_monic_monomial(&mut self.0, MonomialDegree(2 * poly_size - rotation));
     }
 
+    // TODO : rename to bootstrap_lut
     /// re-packs a fresh LUT from its sample extracts
     pub fn bootstrap(&self, public_key: &PublicKey, ctx: &Context) -> LUT {
         let many_lwe = self.to_many_lwe(public_key, ctx);
@@ -1841,6 +1847,8 @@ impl LUTStack {
             ctx.polynomial_size(),
             ctx.ciphertext_modulus(),
         ));
+
+        // FIXME : change small_lwe_dimension to big_lwe_dimension
         let number_of_elements = LweCiphertext::new(
             0_u64,
             ctx.small_lwe_dimension().to_lwe_size(),
@@ -1914,6 +1922,8 @@ impl LUTStack {
                 &mut lwe_sample,
                 MonomialDegree(i * ctx.box_size() as usize),
             );
+
+            // FIXME : delete the keyswitch
             let mut switched = LweCiphertext::new(
                 0,
                 ctx.small_lwe_dimension().to_lwe_size(),
@@ -1957,6 +1967,7 @@ impl LUTStack {
         println!("LUT Stack : {:?}", input_vec);
         println!(
             "LUT Stack size : {:?}",
+            // FIXME : decrypt with big_lwe_sk
             private_key.decrypt_lwe(&self.number_of_elements, ctx)
         );
     }
