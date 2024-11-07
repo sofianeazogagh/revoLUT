@@ -10,7 +10,10 @@ use crate::{Context, LUT, LWE};
 
 impl crate::PublicKey {
     pub fn blind_topk(&self, lwes: &[LWE], k: usize, ctx: &Context) -> Vec<LWE> {
-        self.blind_topk_many_lut(&(vec![lwes.to_vec()]), k, ctx)[0].clone()
+        self.blind_topk_many_lut(&(vec![lwes.to_vec()]), k, ctx)
+            .into_iter()
+            .next()
+            .unwrap()
     }
 
     pub fn blind_topk_many_lut(
@@ -22,7 +25,6 @@ impl crate::PublicKey {
         self.blind_topk_many_lut_par(many_lwes, k, 1, ctx)
     }
 
-    // TODO : a generalisé pour m vecteurs de lwe (pour l'instant m=2)
     pub fn blind_topk_many_lut_par(
         &self,
         many_lwes: &Vec<Vec<LWE>>, // slice of slices
@@ -30,6 +32,12 @@ impl crate::PublicKey {
         num_threads: usize,
         ctx: &Context,
     ) -> Vec<Vec<LWE>> {
+        let n = ctx.full_message_modulus();
+        let m = many_lwes.len();
+        let num_elements = many_lwes[0].len();
+        for lwes in many_lwes {
+            assert_eq!(lwes.len(), num_elements);
+        }
         // Créez un pool de threads avec 4 threads
         let pool = ThreadPoolBuilder::new()
             .num_threads(num_threads)
@@ -37,58 +45,54 @@ impl crate::PublicKey {
             .unwrap();
 
         // println!("new round of top{k} with {} elements", many_lwes[0].len());
-        if many_lwes[0].len() <= k {
+        if num_elements <= k {
             return many_lwes.to_vec();
         }
-        let n = ctx.full_message_modulus();
         assert!(k < n);
 
         // Utilisez Mutex pour permettre un accès concurrent sécurisé aux résultats
-        let result1 = Mutex::new(vec![]);
-        let result2 = Mutex::new(vec![]);
-
+        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let results = Mutex::new(vec![vec![zero; k * (num_elements.div_ceil(n))]; m]);
         // Utilisez le pool de threads pour paralléliser l'itération
         pool.scope(|s| {
             s.spawn(|_| {
-                many_lwes[0]
+                (0..many_lwes[0].len())
+                    .collect::<Vec<usize>>()
                     .chunks(n)
-                    .zip(many_lwes[1].chunks(n))
                     .enumerate()
                     .par_bridge()
-                    .for_each(|(_, (chunk1, chunk2))| {
-                        assert!(chunk1.len() <= n);
-                        let lut_to_sort = LUT::from_vec_of_lwe(chunk1, self, ctx);
-                        let lut_other = LUT::from_vec_of_lwe(chunk2, self, ctx);
-                        let luts = vec![&lut_to_sort, &lut_other];
+                    .for_each(|(chunk_number, chunk)| {
+                        // make a lut from each sequence of lwes
+                        let luts = Vec::from_iter(many_lwes.iter().map(|lwes| {
+                            LUT::from_vec_of_lwe(
+                                &Vec::from_iter(chunk.iter().map(|&i| lwes[i].clone())),
+                                self,
+                                ctx,
+                            )
+                        }));
                         // let start = Instant::now();
                         let sorted_luts = self.many_blind_counting_sort_k(
-                            &luts,
+                            &Vec::from_iter(luts.iter()),
                             ctx,
-                            chunk1.len().min(chunk2.len()),
+                            chunk.len(),
                         );
                         // println!("{:?}", Instant::now() - start);
 
-                        // Ajoutez les résultats dans les vecteurs protégés
-                        let mut res1 = result1.lock().unwrap();
-                        res1.extend(
-                            (0..k.min(chunk1.len()))
-                                .map(|i| self.sample_extract(&sorted_luts[0], i, ctx)),
-                        );
-
-                        let mut res2 = result2.lock().unwrap();
-                        res2.extend(
-                            (0..k.min(chunk2.len()))
-                                .map(|i| self.sample_extract(&sorted_luts[1], i, ctx)),
-                        );
+                        let mut results = results.lock().unwrap();
+                        for (result, sorted_lut) in results.iter_mut().zip(sorted_luts) {
+                            for i in 0..k.min(chunk.len()) {
+                                result[k * chunk_number + i] =
+                                    self.sample_extract(&sorted_lut, i, ctx);
+                            }
+                        }
                     });
             });
         });
 
-        let result = vec![result1.into_inner().unwrap(), result2.into_inner().unwrap()];
-        assert!(result.len() < many_lwes[0].len());
+        let results = results.into_inner().unwrap();
 
         // Appel récursif en style tournoi
-        self.blind_topk_many_lut_par(&result, k, num_threads, ctx)
+        self.blind_topk_many_lut_par(&results, k, num_threads, ctx)
     }
 
     /// blind comparator costing 1 bit of precision
@@ -180,7 +184,7 @@ mod tests {
             .map(|i| private_key.allocate_and_encrypt_lwe(*i, &mut ctx))
             .collect();
 
-        let lwes2: Vec<LWE> = (0..array.len() - 1)
+        let lwes2: Vec<LWE> = (0..array.len())
             .map(|i| private_key.allocate_and_encrypt_lwe(i as u64, &mut ctx))
             .collect();
 
