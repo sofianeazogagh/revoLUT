@@ -1221,7 +1221,7 @@ impl PublicKey {
 
     /// blindly adds x to the i-th box of the given LUT
     /// this process is noisy and the LUT needs bootstrapping before being read
-    /// ```
+    /// ```no_run
     ///    [ a, .. a, b, ... b, c, ..., c, ... ]
     /// + ~[ 0, .. 0, 0, ... 0, x, ..., x, ... ]
     /// ```
