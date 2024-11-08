@@ -116,10 +116,6 @@ impl crate::PublicKey {
         // step 2: build prefix sum
         for i in 1..n {
             let c = self.lut_extract(&count, i - 1, ctx);
-            // if i % (n / 4) == 0 {
-            //     // refresh noise, assuming an addition budget
-            //     c = self.blind_array_access(&c, &id, &ctx);
-            // }
             let j = self.allocate_and_trivially_encrypt_lwe(i as u64, ctx);
             self.blind_array_increment(&mut count, &j, &c, ctx);
         }
