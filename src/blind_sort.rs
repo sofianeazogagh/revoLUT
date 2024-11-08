@@ -1,3 +1,4 @@
+use serde::de::Expected;
 use tfhe::core_crypto::{
     algorithms::{lwe_ciphertext_add_assign, lwe_ciphertext_sub, lwe_ciphertext_sub_assign},
     entities::LweCiphertext,
@@ -102,12 +103,11 @@ impl crate::PublicKey {
         let mut count = LUT::from_vec_trivially(&vec![0; n], ctx);
         let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
         let minus_one = self.allocate_and_trivially_encrypt_lwe(2 * n as u64 - 1, ctx);
-        let id = LUT::from_function(|x| x, ctx);
+        // let id = LUT::from_function(|x| x, ctx);
 
         let private_key = key(ctx.parameters());
+        luts[0].print(&private_key, ctx);
 
-        // println!("initial :");
-        // luts[0].print(&private_key, ctx);
         // step 1: count values
         for i in 0..k {
             let j = self.lut_extract(&luts[0], i, ctx);
@@ -115,11 +115,11 @@ impl crate::PublicKey {
         }
         // step 2: build prefix sum
         for i in 1..n {
-            let mut c = self.lut_extract(&count, i - 1, ctx);
-            if i % (n / 4) == 0 {
-                // refresh noise, assuming an addition budget
-                c = self.blind_array_access(&c, &id, &ctx);
-            }
+            let c = self.lut_extract(&count, i - 1, ctx);
+            // if i % (n / 4) == 0 {
+            //     // refresh noise, assuming an addition budget
+            //     c = self.blind_array_access(&c, &id, &ctx);
+            // }
             let j = self.allocate_and_trivially_encrypt_lwe(i as u64, ctx);
             self.blind_array_increment(&mut count, &j, &c, ctx);
         }
@@ -135,6 +135,9 @@ impl crate::PublicKey {
                 self.blind_array_increment(&mut results[j], &c, &e, ctx);
             }
         }
+
+        results[0].print(&private_key, ctx);
+
         results
     }
 }
@@ -311,5 +314,29 @@ mod tests {
         let elapsed = Instant::now() - begin;
         private_key.debug_glwe("after blind_rotation_assign = ", &lut.0, &ctx);
         println!("Time taken by blind_rotation_assign: {:?}", elapsed);
+    }
+
+    #[test]
+    fn test_blind_counting_sort_noise() {
+        let param = PARAM_MESSAGE_5_CARRY_0;
+        let mut ctx = Context::from(param);
+        let private_key = key(param);
+        let public_key = &private_key.public_key;
+        let array = vec![15, 14];
+
+        for _ in 0..100 {
+            let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+            let begin = Instant::now();
+            let sorted_lut = public_key.blind_counting_sort_k(&lut, &ctx, 2);
+            let elapsed = Instant::now() - begin;
+            println!("run ({:?})", elapsed);
+
+            let expected_array = vec![14, 15];
+            for i in 0..expected_array.len() {
+                let lwe = public_key.lut_extract(&sorted_lut, i, &ctx);
+                let actual = private_key.decrypt_lwe(&lwe, &ctx);
+                assert_eq!(actual, expected_array[i]);
+            }
+        }
     }
 }
