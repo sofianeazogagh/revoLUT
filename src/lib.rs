@@ -398,32 +398,12 @@ impl PrivateKey {
         lwe_ciphertext
     }
 
-    // TODO : change this function to take the modulus as a parameter instead of delta
-    // pub fn allocate_and_encrypt_lwe_with_delta(
-    //     &self,
-    //     input: u64,
-    //     delta: u64,
-    //     ctx: &mut Context,
-    // ) -> LWE {
-    //     let plaintext = Plaintext(delta.wrapping_mul(input));
-
-    //     // Allocate a new LweCiphertext and encrypt our plaintext
-    //     let lwe_ciphertext: LweCiphertextOwned<u64> = allocate_and_encrypt_new_lwe_ciphertext(
-    //         &self.small_lwe_sk,
-    //         plaintext,
-    //         ctx.parameters.lwe_noise_distribution,
-    //         ctx.ciphertext_modulus(),
-    //         &mut ctx.encryption_generator,
-    //     );
-    //     lwe_ciphertext
-    // }
-
     pub fn lwe_encrypt_with_modulus(&self, x: u64, modulus: u64, ctx: &mut Context) -> LWE {
         // we still consider the padding bit
         let delta = (1u64 << 63) / modulus;
         let pt = Plaintext(x * delta);
         let lwe_ciphertext = allocate_and_encrypt_new_lwe_ciphertext(
-            &self.small_lwe_sk,
+            &self.get_big_lwe_sk(),
             pt,
             ctx.parameters.lwe_noise_distribution,
             ctx.ciphertext_modulus(),
@@ -459,7 +439,7 @@ impl PrivateKey {
     }
 
     pub fn decrypt_without_decoding(&self, ciphertext: &LWE) -> Plaintext<u64> {
-        decrypt_lwe_ciphertext(&self.small_lwe_sk, &ciphertext)
+        decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext)
     }
 
     pub fn decrypt_lwe(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
@@ -673,8 +653,7 @@ impl PrivateKey {
 
     pub fn debug_lwe_delta(&self, string: &str, ciphertext: &LWE, delta: u64, ctx: &Context) {
         // Decrypt the PBS multiplication result
-        let plaintext: Plaintext<u64> =
-            decrypt_lwe_ciphertext(&self.get_small_lwe_sk(), &ciphertext);
+        let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext);
         let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / delta;
         println!("{} {}", string, result);
     }
@@ -734,9 +713,9 @@ impl PrivateKey {
         ((plaintext.0 as i64).abs() as f64).log2()
     }
 
-    pub fn lwe_noise_big_sk(&self, ct: &LWE, expected_plaintext: u64, ctx: &Context) -> f64 {
+    pub fn lwe_noise_small_sk(&self, ct: &LWE, expected_plaintext: u64, ctx: &Context) -> f64 {
         // plaintext = b - a*s = Delta*m + e
-        let mut plaintext = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ct);
+        let mut plaintext = decrypt_lwe_ciphertext(&self.get_small_lwe_sk(), &ct);
         // plaintext = plaintext - Delta*m = e
         println!("plaintext={:?}", plaintext.0 / ctx.delta());
         plaintext.0 = plaintext.0.wrapping_sub(ctx.delta() * expected_plaintext);
@@ -754,7 +733,7 @@ impl PrivateKey {
         ctx: &Context,
     ) -> f64 {
         // plaintext = b - a*s = Delta*m + e
-        let plaintext = decrypt_lwe_ciphertext(&self.small_lwe_sk, &ct);
+        let plaintext = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ct);
 
         // res = Round[(plaintext / delta)] % full_message_modulus = m
         let res: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / delta
@@ -1175,7 +1154,6 @@ impl PublicKey {
                 &mut ct_cp,
                 Plaintext((original_index as u64) * ctx.delta()),
             );
-            private_key.debug_small_lwe("ct_cp", &ct_cp, &ctx);
             new_index.push(ct_cp);
 
             many_lut[original_index].print(&private_key, &ctx);
@@ -2153,7 +2131,7 @@ mod test {
         // print the noise of the lwe_rotation_amount
         println!(
             "noise of lwe_rotation_amount: {}",
-            private_key.lwe_noise_big_sk(&lwe_rotation_amount, rotation_amount, &ctx)
+            private_key.lwe_noise(&lwe_rotation_amount, rotation_amount, &ctx)
         );
 
         // keyswitch (small sk)
@@ -2167,7 +2145,7 @@ mod test {
         // print the noise of the switched
         println!(
             "noise of switched: {}",
-            private_key.lwe_noise(&switched, rotation_amount, &ctx)
+            private_key.lwe_noise_small_sk(&switched, rotation_amount, &ctx)
         );
 
         // blind rotation
@@ -2186,7 +2164,7 @@ mod test {
         );
         extract_lwe_sample_from_glwe_ciphertext(&lut.0, &mut extracted_lwe, MonomialDegree(0));
 
-        let noise = private_key.lwe_noise_big_sk(&extracted_lwe, rotation_amount, &ctx);
+        let noise = private_key.lwe_noise(&extracted_lwe, rotation_amount, &ctx);
         println!("noise after sample extract: {:.2}", noise);
 
         let actual = private_key.decrypt_lwe(&extracted_lwe, &ctx);
