@@ -33,6 +33,7 @@ impl crate::PublicKey {
         ctx: &Context,
     ) -> Vec<Vec<LWE>> {
         let n = ctx.full_message_modulus();
+        let m = many_lwes.len();
         let num_elements = many_lwes[0].len();
         for lwes in many_lwes {
             assert_eq!(lwes.len(), num_elements);
@@ -55,7 +56,7 @@ impl crate::PublicKey {
                 .collect::<Vec<usize>>()
                 .chunks(n)
                 .par_bridge()
-                .flat_map(|chunk| {
+                .map(|chunk| {
                     // make a lut from each sequence of lwes
                     let luts = Vec::from_iter(many_lwes.iter().map(|lwes| {
                         LUT::from_vec_of_lwe(
@@ -81,8 +82,16 @@ impl crate::PublicKey {
                 .collect::<Vec<_>>()
         });
 
+        let mut next_many_lwes = vec![vec![]; m];
+        for result in results {
+            for i in 0..m {
+                // result is a m-vector of vector of up to k elements
+                next_many_lwes[i].extend(result[i].iter().cloned())
+            }
+        }
+
         // Appel récursif en style tournoi
-        self.blind_topk_many_lut_par(&results, k, num_threads, ctx)
+        self.blind_topk_many_lut_par(&next_many_lwes, k, num_threads, ctx)
     }
 
     /// blind comparator costing 1 bit of precision
