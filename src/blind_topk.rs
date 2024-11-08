@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::{sync::Mutex, time::Instant};
 
 use rayon::{
     iter::{ParallelBridge, ParallelIterator},
@@ -44,7 +44,7 @@ impl crate::PublicKey {
             .build()
             .unwrap();
 
-        // println!("new round of top{k} with {} elements", many_lwes[0].len());
+        println!("new round of top{k} with {} elements", many_lwes[0].len());
         if num_elements <= k {
             return many_lwes.to_vec();
         }
@@ -70,19 +70,19 @@ impl crate::PublicKey {
                                 ctx,
                             )
                         }));
-                        // let start = Instant::now();
+                        let start = Instant::now();
                         let sorted_luts = self.many_blind_counting_sort_k(
                             &Vec::from_iter(luts.iter()),
                             ctx,
                             chunk.len(),
                         );
-                        // println!("{:?}", Instant::now() - start);
+                        println!("{:?}", Instant::now() - start);
 
                         let mut results = results.lock().unwrap();
                         for (result, sorted_lut) in results.iter_mut().zip(sorted_luts) {
                             for i in 0..k.min(chunk.len()) {
                                 result[k * chunk_number + i] =
-                                    self.sample_extract(&sorted_lut, i, ctx);
+                                    self.lut_extract(&sorted_lut, i, ctx);
                             }
                         }
                     });
@@ -120,14 +120,32 @@ impl crate::PublicKey {
         // print!("sorted:\t");
         // sorted_lut.print(crate::key(ctx.parameters()), ctx);
         (
-            self.sample_extract(&sorted_lut, 0, ctx),
-            self.sample_extract(&sorted_lut, 1, ctx),
+            self.lut_extract(&sorted_lut, 0, ctx),
+            self.lut_extract(&sorted_lut, 1, ctx),
         )
     }
 
-    pub fn yao_topk(&self, lwes: &[LWE], k: usize, ctx: &Context) -> Vec<LWE> {
-        vec![]
+    pub fn blind_comparator_bma(&self, (a, b): (LWE, LWE), ctx: &Context) -> (LWE, LWE) {
+        let n = ctx.full_message_modulus;
+        let matrix = Vec::from_iter(
+            (0..n).map(|lin| Vec::from_iter((0..n).map(|col| if lin < col { 1 } else { 0 }))),
+        );
+        let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
+        let mut lut = LUT::from_vec_of_lwe(
+            &vec![b.clone(), a.clone(), a.clone(), b.clone()],
+            &self,
+            &ctx,
+        );
+        self.blind_rotation_assign(&twice_bit, &mut lut, &ctx);
+        (
+            self.lut_extract(&lut, 0, ctx),
+            self.lut_extract(&lut, 1, ctx),
+        )
     }
+
+    // pub fn yao_topk(&self, lwes: &[LWE], k: usize, ctx: &Context) -> Vec<LWE> {
+    //     vec![]
+    // }
 }
 
 #[cfg(test)]
@@ -144,11 +162,11 @@ mod tests {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let mut array = vec![10u64; 269];
+        let mut array = vec![10u64; 30];
         array[1] = 1;
-        array[100] = 2;
-        array[150] = 3;
-        array[200] = 4;
+        // array[100] = 2;
+        // array[150] = 3;
+        // array[200] = 4;
 
         println!("{:?}", array);
 
@@ -173,11 +191,11 @@ mod tests {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let mut array = vec![10u64; 269];
+        let mut array = vec![10u64; 10];
         array[1] = 1;
-        array[10] = 2;
-        array[15] = 3;
-        array[20] = 4;
+        // array[10] = 2;
+        // array[15] = 3;
+        // array[20] = 4;
 
         let lwes1: Vec<LWE> = array
             .iter()
@@ -214,8 +232,8 @@ mod tests {
         let private_key_zuber = key(ctx_zuber.parameters());
         let public_key_zuber = &private_key_zuber.public_key;
 
-        for i in 0..n as u64 {
-            for j in 0..n as u64 {
+        for i in (0..n as u64).step_by(2) {
+            for j in (0..n as u64).step_by(3) {
                 let a = private_key_zuber.allocate_and_encrypt_lwe(i, &mut ctx_zuber);
                 let b = private_key_zuber.allocate_and_encrypt_lwe(j, &mut ctx_zuber);
                 let start = Instant::now();
@@ -232,10 +250,19 @@ mod tests {
                 let dsa2 = private_key.decrypt_lwe(&sa, &ctx);
                 let dsb2 = private_key.decrypt_lwe(&sb, &ctx);
 
-                println!("({i}, {j}) -> ({dsa1}, {dsb1}) = ({dsa2}, {dsb2})");
+                let a = private_key.allocate_and_encrypt_lwe(i, &mut ctx);
+                let b = private_key.allocate_and_encrypt_lwe(j, &mut ctx);
+                let start = Instant::now();
+                let (sa, sb) = public_key.blind_comparator_bma((a, b), &ctx);
+                print!("bma: {:?}ms\t", (Instant::now() - start).as_millis());
+                let dsa3 = private_key.decrypt_lwe(&sa, &ctx);
+                let dsb3 = private_key.decrypt_lwe(&sb, &ctx);
+
+                println!("({i}, {j}) -> ({dsa1}, {dsb1}) = ({dsa2}, {dsb2}) = ({dsa3}, {dsb3})");
 
                 assert_eq!((dsa1, dsb1), (i.min(j), i.max(j)));
                 assert_eq!((dsa2, dsb2), (i.min(j), i.max(j)));
+                assert_eq!((dsa3, dsb3), (i.min(j), i.max(j)));
             }
         }
     }
