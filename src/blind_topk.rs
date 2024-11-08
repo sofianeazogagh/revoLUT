@@ -22,7 +22,7 @@ impl crate::PublicKey {
         k: usize,
         ctx: &Context,
     ) -> Vec<Vec<LWE>> {
-        self.blind_topk_many_lut_par(many_lwes, k, 1, ctx)
+        self.blind_topk_many_lut_par(many_lwes, k, 4, ctx)
     }
 
     pub fn blind_topk_many_lut_par(
@@ -191,11 +191,11 @@ mod tests {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let mut array = vec![10u64; 10];
+        let mut array = vec![10u64; 269];
         array[1] = 1;
-        // array[10] = 2;
-        // array[15] = 3;
-        // array[20] = 4;
+        array[10] = 2;
+        array[15] = 3;
+        array[20] = 4;
 
         let lwes1: Vec<LWE> = array
             .iter()

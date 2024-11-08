@@ -2163,9 +2163,12 @@ mod test {
                 let result_decrypted = private_key.decrypt_lwe(&result, &ctx);
                 println!(
                     "{}, {}, expected {}, got {}",
-                    lin, col, matrix[lin][col], result_decrypted
+                    lin,
+                    col,
+                    2 * matrix[lin][col] % n as u64,
+                    result_decrypted
                 );
-                assert_eq!(result_decrypted, matrix[lin][col]);
+                assert_eq!(result_decrypted, 2 * matrix[lin][col] % n as u64);
             }
         }
     }
