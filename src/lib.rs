@@ -8,9 +8,11 @@ use aligned_vec::ABox;
 use num_complex::Complex;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::io::Write;
+use std::{fs, io};
 // use std::process::Output;
 use std::sync::OnceLock;
+use std::time::Instant;
 use tfhe::shortint::{CarryModulus, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
@@ -45,8 +47,15 @@ pub fn key(param: ClassicPBSParameters) -> &'static PrivateKey {
     static KEYS: OnceLock<Vec<OnceLock<PrivateKey>>> = OnceLock::new();
     KEYS.get_or_init(|| Vec::from_iter((0..9).map(|_| OnceLock::new())))[bitsize].get_or_init(
         || {
-            PrivateKey::from_file(&format!("PrivateKey{}", bitsize))
-                .unwrap_or_else(|| PrivateKey::to_file(&mut Context::from(param)))
+            // println!("looking for PrivateKey{}", bitsize);
+            let start = Instant::now();
+            let result =
+                PrivateKey::from_file(&format!("PrivateKey{}", bitsize)).unwrap_or_else(|| {
+                    println!("cache miss, generating PrivateKey{}", bitsize);
+                    PrivateKey::to_file(&mut Context::from(param))
+                });
+            // println!("took {:?}", Instant::now() - start);
+            result
         },
     )
 }
@@ -237,21 +246,38 @@ pub struct PrivateKey {
 impl PrivateKey {
     /// Generate a PrivateKey which contain also the PublicKey
     pub fn new(ctx: &mut Context) -> PrivateKey {
+        let n = ctx.full_message_modulus();
+        println!(
+            "generating new secret (and public) key for messages in param {} ({} bits)",
+            n.ilog2(),
+            n
+        );
         // Generate an LweSecretKey with binary coefficients
+        print!("generating small lwe key: ",);
+        let _ = io::stdout().flush();
+        let start = Instant::now();
         let lwe_sk =
             LweSecretKey::generate_new_binary(ctx.small_lwe_dimension(), &mut ctx.secret_generator);
+        println!("{:?}", Instant::now() - start);
 
         // Generate a GlweSecretKey with binary coefficients
+        print!("generating glwe key: ");
+        let _ = io::stdout().flush();
+        let start = Instant::now();
         let glwe_sk = GlweSecretKey::generate_new_binary(
             ctx.glwe_dimension(),
             ctx.polynomial_size(),
             &mut ctx.secret_generator,
         );
+        println!("{:?}", Instant::now() - start);
 
         // Create a copy of the GlweSecretKey re-interpreted as an LweSecretKey
         // let big_lwe_sk = glwe_sk.clone().into_lwe_secret_key();
 
         // Generate the bootstrapping key, we use the parallel variant for performance reason
+        print!("generating std bootstrapping key: ");
+        let _ = io::stdout().flush();
+        let start = Instant::now();
         let std_bootstrapping_key = par_allocate_and_generate_new_lwe_bootstrap_key(
             &lwe_sk,
             &glwe_sk,
@@ -261,8 +287,12 @@ impl PrivateKey {
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
+        println!("{:?}", Instant::now() - start);
 
         // Create the empty bootstrapping key in the Fourier domain
+        print!("convert std bootstrapping key to fourrier bootstrapping key: ");
+        let _ = io::stdout().flush();
+        let start = Instant::now();
         let mut fourier_bsk = FourierLweBootstrapKey::new(
             std_bootstrapping_key.input_lwe_dimension(),
             std_bootstrapping_key.glwe_size(),
@@ -274,9 +304,17 @@ impl PrivateKey {
         // Use the conversion function (a memory optimized version also exists but is more complicated
         // to use) to convert the standard bootstrapping key to the Fourier domain
         convert_standard_lwe_bootstrap_key_to_fourier(&std_bootstrapping_key, &mut fourier_bsk);
+        println!("{:?}", Instant::now() - start);
         // We don't need the standard bootstrapping key anymore
+        print!("dropping std bootstrapping key: ");
+        let _ = io::stdout().flush();
+        let start = Instant::now();
         drop(std_bootstrapping_key);
+        println!("{:?}", Instant::now() - start);
 
+        print!("generating lwe keyswitch key: ");
+        let _ = io::stdout().flush();
+        let start = Instant::now();
         let mut lwe_ksk = LweKeyswitchKey::new(
             0u64,
             ctx.ks_base_log(),
@@ -293,10 +331,14 @@ impl PrivateKey {
             ctx.parameters.lwe_noise_distribution,
             &mut ctx.encryption_generator,
         );
+        println!("{:?}", Instant::now() - start);
 
         // Create Packing Key Switch
 
         // Private Functional Packing Key Switch Key
+        print!("generating lwe private functional packing keyswitch key: ");
+        let _ = io::stdout().flush();
+        let start = Instant::now();
         let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
             0,
             ctx.pfks_base_log(),
@@ -323,22 +365,12 @@ impl PrivateKey {
             |x| x,
             &last_polynomial,
         );
-
-        let cbs_pfpksk = par_allocate_and_generate_new_circuit_bootstrap_lwe_pfpksk_list(
-            &glwe_sk.as_lwe_secret_key(),
-            &glwe_sk,
-            ctx.pfks_base_log(),
-            ctx.pfks_level(),
-            ctx.parameters.glwe_noise_distribution,
-            ctx.ciphertext_modulus(),
-            &mut ctx.encryption_generator,
-        );
+        println!("{:?}", Instant::now() - start);
 
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
             pfpksk,
-            cbs_pfpksk,
         };
 
         PrivateKey {
@@ -630,7 +662,6 @@ pub struct PublicKey {
     pub lwe_ksk: LweKeyswitchKey<Vec<u64>>,
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
     pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
-    pub cbs_pfpksk: LwePrivateFunctionalPackingKeyswitchKeyListOwned<u64>,
 }
 
 impl PublicKey {

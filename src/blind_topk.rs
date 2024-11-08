@@ -33,7 +33,6 @@ impl crate::PublicKey {
         ctx: &Context,
     ) -> Vec<Vec<LWE>> {
         let n = ctx.full_message_modulus();
-        let m = many_lwes.len();
         let num_elements = many_lwes[0].len();
         for lwes in many_lwes {
             assert_eq!(lwes.len(), num_elements);
@@ -50,46 +49,37 @@ impl crate::PublicKey {
         }
         assert!(k < n);
 
-        // Utilisez Mutex pour permettre un accès concurrent sécurisé aux résultats
-        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
-        let results = Mutex::new(vec![vec![zero; k * (num_elements.div_ceil(n))]; m]);
         // Utilisez le pool de threads pour paralléliser l'itération
-        pool.scope(|s| {
-            s.spawn(|_| {
-                (0..many_lwes[0].len())
-                    .collect::<Vec<usize>>()
-                    .chunks(n)
-                    .enumerate()
-                    .par_bridge()
-                    .for_each(|(chunk_number, chunk)| {
-                        // make a lut from each sequence of lwes
-                        let luts = Vec::from_iter(many_lwes.iter().map(|lwes| {
-                            LUT::from_vec_of_lwe(
-                                &Vec::from_iter(chunk.iter().map(|&i| lwes[i].clone())),
-                                self,
-                                ctx,
-                            )
-                        }));
-                        let start = Instant::now();
-                        let sorted_luts = self.many_blind_counting_sort_k(
-                            &Vec::from_iter(luts.iter()),
+        let results = pool.scope(|_| {
+            (0..many_lwes[0].len())
+                .collect::<Vec<usize>>()
+                .chunks(n)
+                .par_bridge()
+                .flat_map(|chunk| {
+                    // make a lut from each sequence of lwes
+                    let luts = Vec::from_iter(many_lwes.iter().map(|lwes| {
+                        LUT::from_vec_of_lwe(
+                            &Vec::from_iter(chunk.iter().map(|&i| lwes[i].clone())),
+                            self,
                             ctx,
-                            chunk.len(),
-                        );
-                        println!("{:?}", Instant::now() - start);
+                        )
+                    }));
+                    let start = Instant::now();
+                    let sorted_luts = self.many_blind_counting_sort_k(
+                        &Vec::from_iter(luts.iter()),
+                        ctx,
+                        chunk.len(),
+                    );
+                    println!("{:?}", Instant::now() - start);
 
-                        let mut results = results.lock().unwrap();
-                        for (result, sorted_lut) in results.iter_mut().zip(sorted_luts) {
-                            for i in 0..k.min(chunk.len()) {
-                                result[k * chunk_number + i] =
-                                    self.lut_extract(&sorted_lut, i, ctx);
-                            }
-                        }
-                    });
-            });
+                    Vec::from_iter(sorted_luts.iter().map(|sorted_lut| {
+                        Vec::from_iter(
+                            (0..k.min(chunk.len())).map(|i| self.lut_extract(sorted_lut, i, ctx)),
+                        )
+                    }))
+                })
+                .collect::<Vec<_>>()
         });
-
-        let results = results.into_inner().unwrap();
 
         // Appel récursif en style tournoi
         self.blind_topk_many_lut_par(&results, k, num_threads, ctx)
