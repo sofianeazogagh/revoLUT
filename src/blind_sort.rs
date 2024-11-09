@@ -1,10 +1,9 @@
-use serde::de::Expected;
 use tfhe::core_crypto::{
     algorithms::{lwe_ciphertext_add_assign, lwe_ciphertext_sub, lwe_ciphertext_sub_assign},
     entities::LweCiphertext,
 };
 
-use crate::{key, Context, LUT, LWE};
+use crate::{Context, LUT};
 
 impl crate::PublicKey {
     /// compares a and b blindly, returning a cipher of 1 if a < b else 0
@@ -103,10 +102,6 @@ impl crate::PublicKey {
         let mut count = LUT::from_vec_trivially(&vec![0; n], ctx);
         let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
         let minus_one = self.allocate_and_trivially_encrypt_lwe(2 * n as u64 - 1, ctx);
-        // let id = LUT::from_function(|x| x, ctx);
-
-        let private_key = key(ctx.parameters());
-        luts[0].print(&private_key, ctx);
 
         // step 1: count values
         for i in 0..k {
@@ -131,8 +126,6 @@ impl crate::PublicKey {
                 self.blind_array_increment(&mut results[j], &c, &e, ctx);
             }
         }
-
-        results[0].print(&private_key, ctx);
 
         results
     }

@@ -48,7 +48,7 @@ pub fn key(param: ClassicPBSParameters) -> &'static PrivateKey {
     KEYS.get_or_init(|| Vec::from_iter((0..9).map(|_| OnceLock::new())))[bitsize].get_or_init(
         || {
             // println!("looking for PrivateKey{}", bitsize);
-            let start = Instant::now();
+            // let start = Instant::now();
             let result =
                 PrivateKey::from_file(&format!("PrivateKey{}", bitsize)).unwrap_or_else(|| {
                     println!("cache miss, generating PrivateKey{}", bitsize);
@@ -469,6 +469,19 @@ impl PrivateKey {
         lwe_ciphertext
     }
 
+    fn decode(params: ClassicPBSParameters, x: u64) -> u64 {
+        let delta = (1u64 << 63) / (params.message_modulus.0 * params.carry_modulus.0) as u64;
+
+        //The bit before the message
+        let rounding_bit = delta >> 1;
+
+        //compute the rounding bit
+        let rounding = (x & rounding_bit) << 1;
+
+        // add the rounding bit and divide by delta
+        x.wrapping_add(rounding) / delta
+    }
+
     pub fn decrypt_without_decoding(&self, ciphertext: &LWE) -> Plaintext<u64> {
         decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext)
     }
@@ -483,8 +496,9 @@ impl PrivateKey {
     pub fn decrypt_lwe_without_reduction(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
         // Decrypt the PBS multiplication result
         let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext);
-        let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
-        result
+        // let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
+        let decoded = Self::decode(ctx.parameters, plaintext.0);
+        decoded
     }
 
     pub fn decrypt_lwe_delta(&self, ciphertext: &LWE, delta: u64, ctx: &Context) -> u64 {
@@ -733,13 +747,10 @@ impl PrivateKey {
 
     pub fn lwe_noise(&self, ct: &LWE, expected_plaintext: u64, ctx: &Context) -> f64 {
         // plaintext = b - a*s = Delta*m + e
-
         let mut plaintext = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ct);
 
         // plaintext = plaintext - Delta*m = e
         plaintext.0 = plaintext.0.wrapping_sub(ctx.delta() * expected_plaintext);
-
-        println!("expected_plaintext={:?}", expected_plaintext);
 
         ((plaintext.0 as i64).abs() as f64).log2()
     }
@@ -748,39 +759,18 @@ impl PrivateKey {
         // plaintext = b - a*s = Delta*m + e
         let mut plaintext = decrypt_lwe_ciphertext(&self.get_small_lwe_sk(), &ct);
         // plaintext = plaintext - Delta*m = e
-        println!("plaintext={:?}", plaintext.0 / ctx.delta());
         plaintext.0 = plaintext.0.wrapping_sub(ctx.delta() * expected_plaintext);
-
-        println!("expected_plaintext={:?}", expected_plaintext);
 
         ((plaintext.0 as i64).abs() as f64).log2()
     }
 
-    pub fn lwe_noise_delta(
-        &self,
-        ct: &LWE,
-        expected_plaintext: u64,
-        delta: u64,
-        ctx: &Context,
-    ) -> f64 {
-        // plaintext = b - a*s = Delta*m + e
-        let plaintext = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ct);
+    pub fn lwe_noise_delta(&self, ct: &LWE, expected_pt: u64, delta: u64) -> f64 {
+        // pt = b - a*s = Delta*m + e
+        let mut pt = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ct);
+        // pt = pt - Delta*m = e (encoded_ptxt is Delta*m)
+        pt.0 = pt.0.wrapping_sub(delta * expected_pt);
 
-        // res = Round[(plaintext / delta)] % full_message_modulus = m
-        let res: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / delta
-            % ctx.full_message_modulus() as u64;
-
-        // noise = plaintext - Delta*m = e
-        let noise = plaintext.0.wrapping_sub(delta * expected_plaintext);
-
-        println!("plaintext reduced : {:?}", res);
-        println!("expected_plaintext : {:?}", expected_plaintext);
-
-        if (noise as u64) >= (delta / 2) {
-            println!("Noise exceeds acceptable threshold.");
-        }
-
-        ((noise as i64).abs() as f64).log2()
+        ((pt.0 as i64).abs() as f64).log2()
     }
 
     pub fn encrypt_matrix(&self, mut ctx: &mut Context, matrix: &Vec<Vec<u64>>) -> Vec<LUT> {
@@ -865,18 +855,17 @@ impl PublicKey {
 
     /// Reduce the plaintext modulus in `ct` from `big_modulus` to `message_modulus`.
     pub fn lower_precision(&self, ct: &mut LWE, ctx: &Context, big_modulus: u64) {
-        let small_delta = (1 << 63) / big_modulus;
+        let small_delta = (1u64 << 63) / big_modulus;
 
         let small_modulus = ctx.message_modulus().0 as u64;
-        let precision_ratio = (1 << 63) / (small_delta * small_modulus);
+        let precision_ratio = (1u64 << 63) / (small_delta * small_modulus);
         assert!(precision_ratio > 1);
 
         let shift = Plaintext(((small_delta * (precision_ratio - 1)) / 2).wrapping_neg());
         lwe_ciphertext_plaintext_add_assign(ct, shift);
 
         // Bootstrap
-        let identity = LUT::from_function(|x| x % ctx.message_modulus().0 as u64, ctx);
-        self.blind_array_access(&ct, &identity, ctx);
+        self.bootstrap_lwe(ct, ctx);
     }
 
     pub fn allocate_and_trivially_encrypt_lwe(&self, input: u64, ctx: &Context) -> LWE {
@@ -1060,6 +1049,7 @@ impl PublicKey {
     }
 
     /// Get an element of an `array` given its `index`
+    /// it can also be used to perform a programable bootstrap
     pub fn blind_array_access(&self, big_input: &LWE, array: &LUT, ctx: &Context) -> LWE {
         let mut big_output = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let small_input = self.allocate_and_keyswitch_lwe_ciphertext(&big_input, ctx);
@@ -1443,9 +1433,10 @@ impl PublicKey {
         lwe
     }
 
-    pub fn bootstrap_lwe(&self, ct_input: &LWE, ctx: &Context) -> LWE {
+    pub fn bootstrap_lwe(&self, ct_input: &mut LWE, ctx: &Context) {
         let identity = LUT::from_function(|x| x % ctx.full_message_modulus() as u64, ctx);
-        self.blind_array_access(ct_input, &identity, ctx)
+        let bootstrapped = self.blind_array_access(ct_input, &identity, ctx);
+        *ct_input = bootstrapped;
     }
     /// blindly adds x to the i-th box of the given LUT
     /// this process is noisy and the LUT needs bootstrapping before being read
@@ -1904,7 +1895,7 @@ mod test {
 
     use itertools::Itertools;
     use quickcheck::TestResult;
-    use tfhe::shortint::{backward_compatibility::public_key, parameters::*};
+    use tfhe::shortint::parameters::*;
 
     use super::*;
 
@@ -1917,27 +1908,109 @@ mod test {
 
         let input = 0;
         let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
-        let mut expected = (input) % ctx.message_modulus().0 as u64; // 2
+        let mut expected = (input) % ctx.message_modulus().0 as u64; // 0
         for i in 1..3 * ctx.full_message_modulus() {
-            let new_lwe = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
-            lwe_ciphertext_add_assign(&mut lwe, &new_lwe);
-            // lwe = public_key.lwe_ciphertext_plaintext_add(&mut lwe, 1, &ctx); // 2 + i
-            expected = (expected + 1) % ctx.message_modulus().0 as u64; // 2 + i
+            // let lwe_one = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
+            // lwe_ciphertext_add_assign(&mut lwe, &lwe_one); // lwe = lwe + 1
+            lwe_ciphertext_plaintext_add_assign(&mut lwe, Plaintext(1 * ctx.delta()));
+            expected = (expected + 1) % ctx.message_modulus().0 as u64; // input + i
             println!("--------------------------------");
             println!(
                 "noise after {}-th incrementation = {}",
                 i,
-                private_key.lwe_noise_delta(&lwe.clone(), expected, ctx.delta(), &ctx)
+                private_key.lwe_noise(&lwe.clone(), expected, &ctx)
             );
-            if i == ctx.full_message_modulus() + 1 {
+            if i == ctx.full_message_modulus() + 3 {
                 println!("------------Bootstrap------------");
-                lwe = public_key.bootstrap_lwe(&lwe, &ctx);
+                public_key.bootstrap_lwe(&mut lwe, &ctx);
+                println!(
+                    "noise after bootstrap = {}",
+                    private_key.lwe_noise(&lwe.clone(), expected, &ctx)
+                );
 
                 println!("--------------------------------");
             }
             private_key.debug_lwe("lwe decrypted", &lwe, &ctx);
             println!("expected: {}", expected);
+            assert_eq!(expected, private_key.decrypt_lwe(&lwe, &ctx));
         }
+    }
+
+    #[test]
+    fn test_lwe_add() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let input1: u64 = 19;
+        let input2: u64 = 1;
+        let mut lwe1 = private_key.allocate_and_encrypt_lwe(input1, &mut ctx);
+        let lwe2 = private_key.allocate_and_encrypt_lwe(input2, &mut ctx);
+        lwe_ciphertext_add_assign(&mut lwe1, &lwe2);
+        let clear = private_key.decrypt_lwe_without_reduction(&lwe1, &mut ctx);
+        println!("clear: {}", clear);
+        // assert_eq!(input1 + input2, clear);
+    }
+
+    #[test]
+    fn test_lwe_add_tfhe_rs() {
+        use tfhe::core_crypto::prelude::*;
+
+        // DISCLAIMER: these toy example parameters are not guaranteed to be secure or yield correct
+        // computations
+        // Define parameters for LweCiphertext creation
+        let lwe_dimension = LweDimension(742);
+        let lwe_noise_distribution =
+            Gaussian::from_dispersion_parameter(StandardDev(0.000007069849454709433), 0.0);
+        let message_modulus = MessageModulus(16);
+        let ciphertext_modulus = CiphertextModulus::new_native();
+
+        // Create the PRNG
+        let mut seeder = new_seeder();
+        let seeder = seeder.as_mut();
+        let mut encryption_generator =
+            EncryptionRandomGenerator::<ActivatedRandomGenerator>::new(seeder.seed(), seeder);
+        let mut secret_generator =
+            SecretRandomGenerator::<ActivatedRandomGenerator>::new(seeder.seed());
+
+        // Create the LweSecretKey
+        let lwe_secret_key =
+            allocate_and_generate_new_binary_lwe_secret_key(lwe_dimension, &mut secret_generator);
+
+        // Create the plaintext
+        let delta = (1u64 << 63) / (message_modulus.0 as u64);
+        let msg1 = 15;
+        let msg2 = 15;
+        let plaintext1 = Plaintext(msg1 * delta);
+        let plaintext2 = Plaintext(msg2 * delta);
+
+        // Create a new LweCiphertext
+        let lwe1 = allocate_and_encrypt_new_lwe_ciphertext(
+            &lwe_secret_key,
+            plaintext1,
+            lwe_noise_distribution,
+            ciphertext_modulus,
+            &mut encryption_generator,
+        );
+        let lwe2 = allocate_and_encrypt_new_lwe_ciphertext(
+            &lwe_secret_key,
+            plaintext2,
+            lwe_noise_distribution,
+            ciphertext_modulus,
+            &mut encryption_generator,
+        );
+        let mut lwe_sum = lwe1.clone();
+        lwe_ciphertext_add_assign(&mut lwe_sum, &lwe2);
+        lwe_ciphertext_plaintext_add_assign(&mut lwe_sum, Plaintext(4 * delta));
+
+        let decrypted_plaintext = decrypt_lwe_ciphertext(&lwe_secret_key, &lwe_sum);
+
+        // Round and remove encoding
+        // First create a decomposer working on the high 4 bits corresponding to our encoding.
+        let decomposer = SignedDecomposer::new(DecompositionBaseLog(4), DecompositionLevelCount(1));
+        let rounded = decomposer.closest_representable(decrypted_plaintext.0);
+        // Remove the encoding
+        let cleartext = rounded / delta;
+
+        println!("cleartext: {}", cleartext);
     }
     #[test]
     fn test_lwe_enc() {
@@ -2687,5 +2760,36 @@ mod test {
         // conclusion : monomial is ~two times faster than fft
         // TODO : check if this is correct
         assert_eq!(actual_fft, actual_monomial);
+    }
+
+    #[test]
+    fn test_lwe_noise() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+        // let n = ctx.full_message_modulus();
+
+        for _ in 0..8 {
+            let mut output = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
+            println!("initial noise {}", private_key.lwe_noise(&output, 0, &ctx));
+
+            let zero = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
+            for _ in 1..128 {
+                lwe_ciphertext_add_assign(&mut output, &zero);
+                let decrypted = private_key.decrypt_lwe(&output, &ctx);
+                assert_eq!(decrypted, 0);
+            }
+            let noise = private_key.lwe_noise(&output, 0, &ctx);
+            println!("noise after 128 addition {} ({})", noise, 0);
+
+            let identity = LUT::from_function(|x| x, &ctx);
+            let bootstrapped = public_key.blind_array_access(&output, &identity, &ctx);
+            println!(
+                "after bootstrapping noise {}",
+                private_key.lwe_noise(&bootstrapped, 0, &ctx)
+            );
+
+            println!("=======");
+        }
     }
 }

@@ -1,4 +1,4 @@
-use std::{sync::Mutex, time::Instant};
+use std::time::Instant;
 
 use rayon::{
     iter::{ParallelBridge, ParallelIterator},
@@ -22,7 +22,7 @@ impl crate::PublicKey {
         k: usize,
         ctx: &Context,
     ) -> Vec<Vec<LWE>> {
-        self.blind_topk_many_lut_par(many_lwes, k, 1, ctx)
+        self.blind_topk_many_lut_par(many_lwes, k, 4, ctx)
     }
 
     pub fn blind_topk_many_lut_par(
