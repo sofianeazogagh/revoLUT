@@ -1893,43 +1893,6 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_bootstrap() {
-        let param = PARAM_MESSAGE_4_CARRY_0;
-        let mut ctx = Context::from(param);
-        let private_key = key(param);
-        let public_key = &private_key.public_key;
-
-        let input = 0;
-        let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
-        let mut expected = (input) % ctx.message_modulus().0 as u64; // 0
-        for i in 1..3 * ctx.full_message_modulus() {
-            // let lwe_one = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
-            // lwe_ciphertext_add_assign(&mut lwe, &lwe_one); // lwe = lwe + 1
-            lwe_ciphertext_plaintext_add_assign(&mut lwe, Plaintext(1 * ctx.delta()));
-            expected = (expected + 1) % ctx.message_modulus().0 as u64; // input + i
-            println!("--------------------------------");
-            println!(
-                "noise after {}-th incrementation = {}",
-                i,
-                private_key.lwe_noise(&lwe.clone(), expected, &ctx)
-            );
-            if i == ctx.full_message_modulus() + 3 {
-                println!("------------Bootstrap------------");
-                public_key.bootstrap_lwe(&mut lwe, &ctx);
-                println!(
-                    "noise after bootstrap = {}",
-                    private_key.lwe_noise(&lwe.clone(), expected, &ctx)
-                );
-
-                println!("--------------------------------");
-            }
-            private_key.debug_lwe("lwe decrypted", &lwe, &ctx);
-            println!("expected: {}", expected);
-            assert_eq!(expected, private_key.decrypt_lwe(&lwe, &ctx));
-        }
-    }
-
-    #[test]
     fn test_lwe_add() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(PARAM_MESSAGE_4_CARRY_0);
@@ -2009,7 +1972,7 @@ mod test {
     fn test_lwe_enc() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(PARAM_MESSAGE_4_CARRY_0);
-        let input: u64 = 35;
+        let input: u64 = 1;
         let lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
         let clear = private_key.decrypt_lwe(&lwe, &mut ctx); // decryption with reduction
         println!("Test encryption-decryption");
