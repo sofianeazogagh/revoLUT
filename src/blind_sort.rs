@@ -103,6 +103,11 @@ impl crate::PublicKey {
         let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
         let minus_one = self.allocate_and_trivially_encrypt_lwe(2 * n as u64 - 1, ctx);
 
+        let private_key = crate::key(ctx.parameters());
+        let initial_lut = luts[0].clone().to_array(private_key, ctx);
+        println!("initial lut");
+        luts[0].print(&private_key, ctx);
+
         // step 1: count values
         for i in 0..k {
             let j = self.lut_extract(&luts[0], i, ctx);
@@ -126,6 +131,25 @@ impl crate::PublicKey {
                 self.blind_array_increment(&mut results[j], &c, &e, ctx);
             }
         }
+
+        println!("sorted lut");
+        results[0].print(&private_key, ctx);
+
+        // Verify that result matches initial array sorted
+        let result = results[0].to_array(private_key, ctx);
+        let mut expected = initial_lut.clone();
+        expected.sort_by(|a, b| {
+            if *a == 0 && *b == 0 {
+                std::cmp::Ordering::Equal
+            } else if *a == 0 {
+                std::cmp::Ordering::Greater
+            } else if *b == 0 {
+                std::cmp::Ordering::Less
+            } else {
+                a.cmp(b)
+            }
+        });
+        assert_eq!(result, expected, "Sorted result does not match expected");
 
         results
     }

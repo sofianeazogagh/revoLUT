@@ -10,6 +10,7 @@ use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::{fs, io};
+use tfhe::boolean::public_key;
 // use std::process::Output;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -404,7 +405,6 @@ impl PrivateKey {
         &self.small_lwe_sk
     }
 
-    // TODO : see if this is correct
     pub fn get_big_lwe_sk(&self) -> LweSecretKey<&[u64]> {
         self.glwe_sk.as_lwe_secret_key()
     }
@@ -523,18 +523,6 @@ impl PrivateKey {
             .collect()
     }
 
-    // TODO : rename this function
-    pub fn decrypt_lwe_vector_without_mod_delta(
-        &self,
-        ciphertext: &Vec<LWE>,
-        delta: u64,
-        ctx: &Context,
-    ) -> Vec<u64> {
-        ciphertext
-            .iter()
-            .map(|ct| self.decrypt_lwe_delta(ct, delta, ctx))
-            .collect()
-    }
     pub fn decrypt_lwe_small_key(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
         // Decrypt the PBS multiplication result
         let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.small_lwe_sk, &ciphertext);
@@ -595,12 +583,12 @@ impl PrivateKey {
     }
 
     pub fn allocate_and_encrypt_glwe_from_vec(&self, vec: &Vec<u64>, ctx: &mut Context) -> GLWE {
-        let encoded_vec = self.encode_glwe_plaintext_from_vec(vec, ctx);
+        let encoded_vec = self.encode_plaintext_list_from_vec(vec, ctx);
         let output_glwe = self.allocate_and_encrypt_glwe(encoded_vec, ctx);
         output_glwe
     }
 
-    pub fn encode_glwe_plaintext_from_vec(
+    pub fn encode_plaintext_list_from_vec(
         &self,
         vec: &Vec<u64>,
         ctx: &Context,
@@ -612,21 +600,6 @@ impl PrivateKey {
         PlaintextList::from_container(encoded_vec)
     }
 
-    // // TODO : rename this function
-    // pub fn encode_glwe_plaintext_from_vec_with_modulus(
-    //     &self,
-    //     vec: &Vec<u64>,
-    //     modulus: u64,
-    //     ctx: &Context,
-    // ) -> PlaintextList<Vec<u64>> {
-    //     let mut encoded_vec: Vec<u64> = vec.iter().map(|x| x * delta).collect();
-    //     if encoded_vec.len() < ctx.polynomial_size().0 {
-    //         encoded_vec.resize(ctx.polynomial_size().0, 0_u64);
-    //     }
-    //     PlaintextList::from_container(encoded_vec)
-    // }
-
-    // TODO : rename this function
     pub fn allocate_and_encrypt_glwe_with_modulus(
         &self,
         vec: &Vec<u64>,
@@ -771,6 +744,24 @@ impl PrivateKey {
         pt.0 = pt.0.wrapping_sub(delta * expected_pt);
 
         ((pt.0 as i64).abs() as f64).log2()
+    }
+
+    pub fn glwe_noise(&self, glwe: &GLWE, expected_pt: &Vec<u64>, ctx: &Context) -> Vec<f64> {
+        // Plaintext_list = B(X) - A(X)*S(X) + E(X)
+        let mut plaintext_res = PlaintextList::new(0, PlaintextCount(ctx.polynomial_size().0));
+        decrypt_glwe_ciphertext(&self.get_glwe_sk(), &glwe, &mut plaintext_res);
+
+        // E = Plaintext_list - Delta*expected_pt
+        let e: Vec<_> = plaintext_res
+            .iter()
+            .zip(expected_pt.iter())
+            .map(|(x, &expected)| x.0.wrapping_sub(ctx.delta() * expected))
+            .collect();
+
+        // log2(abs(ei))
+        e.iter()
+            .map(|x| ((*x as i64).abs() as f64).log2())
+            .collect::<Vec<f64>>()
     }
 
     pub fn encrypt_matrix(&self, mut ctx: &mut Context, matrix: &Vec<Vec<u64>>) -> Vec<LUT> {
@@ -1116,23 +1107,29 @@ impl PublicKey {
             matrix_in_poly_form.push(Polynomial::from_container(vec_l_with_redundancy));
         }
 
-        // Multiplier chaque ligne de la matrice par le polynôme lhs
+        // Step 1 : Multiplier chaque ligne de la matrice par le polynôme lhs
+
+        // Init fft material
+        let (fft, mut mem) = init_fft(ctx.polynomial_size());
+        let mut stack = PodStack::new(&mut mem);
+
         let mut new_matrix: Vec<Poly> = Vec::new();
         for p in matrix_in_poly_form.iter() {
             let mut res_mul = Polynomial::new(0_u64, ctx.polynomial_size());
-            polynomial_karatsuba_wrapping_mul(&mut res_mul, &lhs, &p);
+            polynomial_fft_wrapping_mul(&mut res_mul, &lhs, &p, fft.as_view(), &mut stack);
             new_matrix.push(res_mul);
         }
 
-        // Préparer la LUT pour la rotation aveugle
+        // Step 2 : Préparer la LUT pour la rotation aveugle
         let mut only_lut_to_rotate = LUT(glwe_rhs);
         // let start_bma_mv = Instant::now();
         self.blind_rotation_assign(&lwe_column, &mut only_lut_to_rotate, ctx);
 
-        // Appliquer l'absorption GLWE pour chaque ligne de la nouvelle matrice
+        // Step 3 : Appliquer l'absorption GLWE pour chaque ligne de la nouvelle matrice
         let mut columns_lwe: Vec<LWE> = Vec::new();
         for line in new_matrix.iter() {
-            let lut = LUT(self.glwe_absorption_polynomial(&mut only_lut_to_rotate.0, line));
+            let lut =
+                LUT(self.glwe_absorption_polynomial_with_fft(&mut only_lut_to_rotate.0, line));
             let ct = self.lut_extract(&lut, 0, ctx);
             columns_lwe.push(ct);
         }
@@ -1140,12 +1137,10 @@ impl PublicKey {
         let lut_col = LUT::from_vec_of_lwe(&columns_lwe, self, ctx);
 
         // Effectuer une rotation aveugle sur la LUT colonne
-        let result = self.blind_array_access(&lwe_line, &lut_col, ctx);
+        let mut result = self.blind_array_access(&lwe_line, &lut_col, ctx);
 
-        // let elapsed = Instant::now() - start_bma_mv;
-        // print!("bma_mv ({:?}): ", elapsed);
-
-        // TODO: half result
+        // FIXME: half result may behave weirdly
+        result.as_mut().iter_mut().for_each(|x| *x /= 2);
         return result;
     }
 
@@ -1687,7 +1682,6 @@ impl LUT {
             &lwe,
         );
 
-        // TODO : change this by simply absorbing the output with [1,..,1,0,..,0]
         // fill the first box in log(box_size) glwe sums
         for i in 0..ctx.box_size().ilog2() {
             let mut other = output.clone();
@@ -1762,9 +1756,8 @@ impl LUT {
             .glwe_absorption_monic_monomial(&mut self.0, MonomialDegree(2 * poly_size - rotation));
     }
 
-    // TODO : rename to bootstrap_lut
     /// re-packs a fresh LUT from its sample extracts
-    pub fn bootstrap(&self, public_key: &PublicKey, ctx: &Context) -> LUT {
+    pub fn bootstrap_lut(&self, public_key: &PublicKey, ctx: &Context) -> LUT {
         let many_lwe = self.to_many_lwe(public_key, ctx);
         LUT::from_vec_of_lwe(&many_lwe, public_key, ctx)
     }
@@ -2121,7 +2114,6 @@ mod test {
     }
 
     #[test]
-
     fn test_eq_scalar() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(PARAM_MESSAGE_4_CARRY_0);
@@ -2412,7 +2404,7 @@ mod test {
 
         let lut = LUT::from_vec_trivially(&vec![2, 0, 1, 3], &ctx);
 
-        let other = lut.bootstrap(public_key, &ctx);
+        let other = lut.bootstrap_lut(public_key, &ctx);
 
         for i in 0..ctx.full_message_modulus() {
             let expected = private_key.decrypt_lwe(&public_key.lut_extract(&lut, i, &ctx), &ctx);
@@ -2596,17 +2588,20 @@ mod test {
             for col in 0..n {
                 let lwe_line = private_key.allocate_and_encrypt_lwe(lin as u64, &mut ctx);
                 let lwe_column = private_key.allocate_and_encrypt_lwe(col as u64, &mut ctx);
+                let start = Instant::now();
                 let result =
                     public_key.blind_matrix_access_mv(&matrix, &lwe_line, &lwe_column, &ctx);
+                let elapsed = Instant::now() - start;
                 let result_decrypted = private_key.decrypt_lwe(&result, &ctx);
                 println!(
-                    "{}, {}, expected {}, got {}",
+                    "{}, {}, expected {}, got {} ({:?})",
                     lin,
                     col,
-                    2 * matrix[lin][col] % n as u64,
-                    result_decrypted
+                    matrix[lin][col] % n as u64,
+                    result_decrypted,
+                    elapsed
                 );
-                assert_eq!(result_decrypted, 2 * matrix[lin][col] % n as u64);
+                assert_eq!(result_decrypted, matrix[lin][col] % n as u64);
             }
         }
     }
@@ -2758,7 +2753,6 @@ mod test {
         println!("Time taken monomial: {:?}", end.duration_since(start));
 
         // conclusion : monomial is ~two times faster than fft
-        // TODO : check if this is correct
         assert_eq!(actual_fft, actual_monomial);
     }
 
