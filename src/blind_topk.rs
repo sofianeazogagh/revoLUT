@@ -38,13 +38,13 @@ impl crate::PublicKey {
         for lwes in many_lwes {
             assert_eq!(lwes.len(), num_elements);
         }
-        // Créez un pool de threads avec 4 threads
+        // Créez un pool de threads avec num_threads threads
         let pool = ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .build()
             .unwrap();
 
-        println!("new round of top{k} with {} elements", many_lwes[0].len());
+        // println!("new round of top{k} with {} elements", many_lwes[0].len());
         if num_elements <= k {
             return many_lwes.to_vec();
         }
@@ -65,13 +65,13 @@ impl crate::PublicKey {
                             ctx,
                         )
                     }));
-                    let start = Instant::now();
+                    // let start = Instant::now();
                     let sorted_luts = self.many_blind_counting_sort_k(
                         &Vec::from_iter(luts.iter()),
                         ctx,
                         chunk.len(),
                     );
-                    println!("{:?}", Instant::now() - start);
+                    // println!("{:?}", Instant::now() - start);
 
                     Vec::from_iter(sorted_luts.iter().map(|sorted_lut| {
                         Vec::from_iter(

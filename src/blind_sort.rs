@@ -103,16 +103,17 @@ impl crate::PublicKey {
         let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
         let minus_one = self.allocate_and_trivially_encrypt_lwe(2 * n as u64 - 1, ctx);
 
-        let private_key = crate::key(ctx.parameters());
-        let initial_lut = luts[0].clone().to_array(private_key, ctx);
-        println!("initial lut");
-        luts[0].print(&private_key, ctx);
+        // let private_key = crate::key(ctx.parameters());
+        // let initial_lut = luts[0].clone().to_array(private_key, ctx);
+        // println!("initial lut");
+        // luts[0].print(&private_key, ctx);
 
         // step 1: count values
         for i in 0..k {
             let j = self.lut_extract(&luts[0], i, ctx);
             self.blind_array_increment(&mut count, &j, &one, ctx);
         }
+
         // step 2: build prefix sum
         for i in 1..n {
             let c = self.lut_extract(&count, i - 1, ctx);
@@ -132,24 +133,26 @@ impl crate::PublicKey {
             }
         }
 
-        println!("sorted lut");
-        results[0].print(&private_key, ctx);
+        // Total = 4p BR + 4p PFKS
 
-        // Verify that result matches initial array sorted
-        let result = results[0].to_array(private_key, ctx);
-        let mut expected = initial_lut.clone();
-        expected.sort_by(|a, b| {
-            if *a == 0 && *b == 0 {
-                std::cmp::Ordering::Equal
-            } else if *a == 0 {
-                std::cmp::Ordering::Greater
-            } else if *b == 0 {
-                std::cmp::Ordering::Less
-            } else {
-                a.cmp(b)
-            }
-        });
-        assert_eq!(result, expected, "Sorted result does not match expected");
+        // println!("sorted lut");
+        // results[0].print(&private_key, ctx);
+
+        // // Verify that result matches initial array sorted
+        // let result = results[0].to_array(private_key, ctx);
+        // let mut expected = initial_lut.clone();
+        // expected.sort_by(|a, b| {
+        //     if *a == 0 && *b == 0 {
+        //         std::cmp::Ordering::Equal
+        //     } else if *a == 0 {
+        //         std::cmp::Ordering::Greater
+        //     } else if *b == 0 {
+        //         std::cmp::Ordering::Less
+        //     } else {
+        //         a.cmp(b)
+        //     }
+        // });
+        // assert_eq!(result, expected, "Sorted result does not match expected");
 
         results
     }
@@ -258,7 +261,7 @@ mod tests {
 
     #[test]
     fn test_blind_counting_sort() {
-        let param = PARAM_MESSAGE_3_CARRY_0;
+        let param = PARAM_MESSAGE_4_CARRY_0;
         let mut ctx = Context::from(param);
         let private_key = key(param);
         let public_key = &private_key.public_key;
@@ -331,7 +334,7 @@ mod tests {
 
     #[test]
     fn test_blind_counting_sort_noise() {
-        let param = PARAM_MESSAGE_5_CARRY_0;
+        let param = PARAM_MESSAGE_4_CARRY_0;
         let mut ctx = Context::from(param);
         let private_key = key(param);
         let public_key = &private_key.public_key;

@@ -368,10 +368,26 @@ impl PrivateKey {
         );
         println!("{:?}", Instant::now() - start);
 
+        // Public Packing Key Switch
+        print!("generating lwe packing keyswitch key: ");
+        let _ = io::stdout().flush();
+        let start = Instant::now();
+        let packing_ksk = allocate_and_generate_new_lwe_packing_keyswitch_key(
+            &glwe_sk.as_lwe_secret_key(),
+            &glwe_sk,
+            ctx.pbs_base_log(),
+            ctx.pbs_level(),
+            ctx.parameters.glwe_noise_distribution,
+            ctx.ciphertext_modulus(),
+            &mut ctx.encryption_generator,
+        );
+        println!("{:?}", Instant::now() - start);
+
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
             pfpksk,
+            packing_ksk,
         };
 
         PrivateKey {
@@ -807,6 +823,7 @@ pub struct PublicKey {
     pub lwe_ksk: LweKeyswitchKey<Vec<u64>>,
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
     pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
+    pub packing_ksk: LwePackingKeyswitchKey<Vec<u64>>,
 }
 
 impl PublicKey {
@@ -1668,6 +1685,40 @@ impl LUT {
         LUT(acc)
     }
 
+    // /// creates a LUT whose first box is filled with copies of the given lwe
+    // pub fn from_lwe(lwe: &LWE, public_key: &PublicKey, ctx: &Context) -> LUT {
+    //     let mut output = GlweCiphertext::new(
+    //         0,
+    //         ctx.glwe_dimension().to_glwe_size(),
+    //         ctx.polynomial_size(),
+    //         ctx.ciphertext_modulus(),
+    //     );
+    //     // par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
+    //     //     &public_key.pfpksk,
+    //     //     &mut output,
+    //     //     &lwe,
+    //     // );
+
+    //     private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
+    //         &public_key.pfpksk,
+    //         &mut output,
+    //         &lwe,
+    //     );
+
+    //     // fill the first box in log(box_size) glwe sums
+    //     for i in 0..ctx.box_size().ilog2() {
+    //         let mut other = output.clone();
+    //         public_key.glwe_absorption_monic_monomial(&mut other, MonomialDegree(2usize.pow(i)));
+    //         public_key.glwe_sum_assign(&mut output, &other);
+    //     }
+
+    //     // center the box
+    //     let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
+    //     public_key.glwe_absorption_monic_monomial(&mut output, poly_monomial_degree);
+
+    //     LUT(output)
+    // }
+
     /// creates a LUT whose first box is filled with copies of the given lwe
     pub fn from_lwe(lwe: &LWE, public_key: &PublicKey, ctx: &Context) -> LUT {
         let mut output = GlweCiphertext::new(
@@ -1676,11 +1727,8 @@ impl LUT {
             ctx.polynomial_size(),
             ctx.ciphertext_modulus(),
         );
-        par_private_functional_keyswitch_lwe_ciphertext_into_glwe_ciphertext(
-            &public_key.pfpksk,
-            &mut output,
-            &lwe,
-        );
+
+        keyswitch_lwe_ciphertext_into_glwe_ciphertext(&public_key.packing_ksk, &lwe, &mut output);
 
         // fill the first box in log(box_size) glwe sums
         for i in 0..ctx.box_size().ilog2() {
@@ -2037,7 +2085,7 @@ mod test {
     }
 
     #[test]
-    fn test_many_lwe_to_glwe() {
+    fn test_lut_from_many_lwe() {
         let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
         let private_key = PrivateKey::new(&mut ctx);
         let public_key = &private_key.public_key;
@@ -2047,9 +2095,6 @@ mod test {
             let lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
             many_lwe.push(lwe);
         }
-        // for lwe in many_lwe.clone() {
-        //     private_key.debug_lwe("ct", &lwe, &ctx);
-        // }
         let lut = LUT::from_vec_of_lwe(&many_lwe, public_key, &ctx);
         let output_pt = private_key.decrypt_and_decode_glwe(&lut.0, &ctx);
         println!("Test many LWE to one GLWE");
@@ -2067,6 +2112,7 @@ mod test {
             let start = Instant::now();
             let lut = LUT::from_lwe(&lwe, public_key, &ctx);
             let elapsed = Instant::now() - start;
+            lut.print(&private_key, &ctx);
             println!("Time taken to create LUT: {:?}", elapsed);
             for j in 0..16u64 {
                 let output = public_key.lut_extract(&lut, j as usize, &ctx);
@@ -2748,5 +2794,81 @@ mod test {
 
             println!("=======");
         }
+    }
+    #[test]
+    fn test_pbs_duration() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = PrivateKey::new(&mut ctx);
+        let public_key = &private_key.public_key;
+
+        let lwe = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
+        let lut = LUT::from_vec(
+            &Vec::from_iter(0..ctx.message_modulus().0 as u64),
+            &private_key,
+            &mut ctx,
+        );
+
+        let mut total_dur = 0u64;
+        let num_trials = 100;
+
+        for _ in 0..num_trials {
+            let start = Instant::now();
+            public_key.blind_array_access(&lwe, &lut, &ctx);
+            let dur = start.elapsed().as_millis() as u64;
+            total_dur += dur;
+        }
+
+        let avg_dur = total_dur as f64 / num_trials as f64;
+        println!("Average time taken for a pbs: {:.2}ms", avg_dur);
+    }
+
+    #[test]
+    fn test_lut_from_lwe_avg_dur() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let mut total_dur = 0u64;
+        let num_trials = 100;
+
+        for _ in 0..num_trials {
+            let lwe = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
+            let start = Instant::now();
+            let _ = LUT::from_lwe(&lwe, public_key, &ctx);
+            let dur = start.elapsed().as_millis() as u64;
+            total_dur += dur;
+        }
+
+        let avg_dur = total_dur as f64 / num_trials as f64;
+        println!("[DEBUG] avg_lut_from_lwe={:.2}ms", avg_dur);
+    }
+
+    #[test]
+    fn test_lut_from_vec_lwe_avg_dur() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        // let private_key = PrivateKey::new(&mut ctx);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let mut total_dur = 0u64;
+        let num_trials = 100;
+
+        for _ in 0..num_trials {
+            let start = Instant::now();
+            let lut = LUT::from_vec_of_lwe(
+                &Vec::from_iter(0..ctx.message_modulus().0 as u64)
+                    .into_iter()
+                    .map(|x| private_key.allocate_and_encrypt_lwe(x, &mut ctx))
+                    .collect::<Vec<_>>(),
+                &public_key,
+                &mut ctx,
+            );
+            let dur = start.elapsed().as_millis() as u64;
+            lut.print(private_key, &ctx);
+            total_dur += dur;
+        }
+
+        let avg_dur = total_dur as f64 / num_trials as f64;
+        println!("[DEBUG] avg_lut_from_lwe={:.2}ms", avg_dur);
     }
 }
