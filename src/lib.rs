@@ -10,7 +10,6 @@ use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::{fs, io};
-use tfhe::boolean::public_key;
 // use std::process::Output;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -918,6 +917,23 @@ impl PublicKey {
         self.blind_array_access(&ct_input, &eq_scalar_accumulator, ctx)
     }
 
+    pub fn lwe_mul_encrypted_bit(&self, lwe: &LWE, bit: &LWE, ctx: &Context) -> LWE {
+        let lwe_cp = lwe.clone();
+        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        self.cmux(zero, lwe_cp, bit, ctx)
+    }
+
+    pub fn lwe_mul(&self, lwe1: &LWE, lwe2: &LWE, ctx: &Context) -> LWE {
+        let mut many_lwe = Vec::new();
+        for i in 0..ctx.full_message_modulus() - 1 {
+            let mut i_lwe1 = lwe1.clone();
+            lwe_ciphertext_cleartext_mul_assign(&mut i_lwe1, Cleartext(i as u64));
+            many_lwe.push(i_lwe1);
+        }
+        let lut = LUT::from_vec_of_lwe(&many_lwe, self, ctx);
+        self.blind_array_access(lwe2, &lut, ctx)
+    }
+
     pub fn glwe_absorption_monic_monomial(&self, glwe: &mut GLWE, monomial_degree: MonomialDegree) {
         let mut glwe_poly_list = glwe.as_mut_polynomial_list();
         for mut glwe_poly in glwe_poly_list.iter_mut() {
@@ -1497,6 +1513,13 @@ impl PublicKey {
         }
 
         i
+    }
+
+    // Blind select between two LWE (selector = 0 ? lwe1 : lwe2)
+    pub fn cmux(&self, lwe1: LWE, lwe2: LWE, selector: &LWE, ctx: &Context) -> LWE {
+        let vec_lwe = vec![lwe1, lwe2];
+        let lut = LUT::from_vec_of_lwe(&vec_lwe, self, ctx);
+        self.blind_array_access(&selector, &lut, ctx)
     }
 }
 
@@ -2870,5 +2893,33 @@ mod test {
 
         let avg_dur = total_dur as f64 / num_trials as f64;
         println!("[DEBUG] avg_lut_from_lwe={:.2}ms", avg_dur);
+    }
+
+    #[test]
+    fn test_lwe_mul() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        // Test multiplication of two encrypted values
+        for i in 0..ctx.full_message_modulus() - 1 {
+            for j in 0..ctx.full_message_modulus() - 1 {
+                let val1 = i as u64;
+                let val2 = j as u64;
+                let expected = val1 * val2;
+
+                let lwe1 = private_key.allocate_and_encrypt_lwe(val1, &mut ctx);
+                let lwe2 = private_key.allocate_and_encrypt_lwe(val2, &mut ctx);
+
+                let start = Instant::now();
+                let result = public_key.lwe_mul(&lwe1, &lwe2, &ctx);
+                let end = Instant::now();
+                println!("Time taken for lwe_mul: {:?}", end.duration_since(start));
+
+                // Decrypt and verify result
+                let decrypted = private_key.decrypt_lwe(&result, &ctx);
+                assert_eq!(decrypted, expected % ctx.message_modulus().0 as u64);
+            }
+        }
     }
 }
