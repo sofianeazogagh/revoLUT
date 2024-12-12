@@ -860,6 +860,12 @@ impl PublicKey {
         return neg_lwe;
     }
 
+    pub fn not_lwe(&self, lwe: &LWE, ctx: &Context) -> LWE {
+        let mut not_lwe = self.allocate_and_trivially_encrypt_lwe(1, ctx);
+        lwe_ciphertext_sub_assign(&mut not_lwe, &lwe);
+        not_lwe
+    }
+
     /// Reduce the plaintext modulus in `ct` from `big_modulus` to `message_modulus`.
     pub fn lower_precision(&self, ct: &mut LWE, ctx: &Context, big_modulus: u64) {
         let small_delta = (1u64 << 63) / big_modulus;
@@ -917,12 +923,14 @@ impl PublicKey {
         self.blind_array_access(&ct_input, &eq_scalar_accumulator, ctx)
     }
 
+    // Simulate a multiplication of an LWE by an encrypted bit using a LUT
     pub fn lwe_mul_encrypted_bit(&self, lwe: &LWE, bit: &LWE, ctx: &Context) -> LWE {
         let lwe_cp = lwe.clone();
         let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         self.cmux(zero, lwe_cp, bit, ctx)
     }
 
+    // Simulate a multiplication of an LWE by another LWE using a LUT
     pub fn lwe_mul(&self, lwe1: &LWE, lwe2: &LWE, ctx: &Context) -> LWE {
         let mut many_lwe = Vec::new();
         for i in 0..ctx.full_message_modulus() - 1 {
@@ -1170,10 +1178,10 @@ impl PublicKey {
         let lut_col = LUT::from_vec_of_lwe(&columns_lwe, self, ctx);
 
         // Effectuer une rotation aveugle sur la LUT colonne
-        let mut result = self.blind_array_access(&lwe_line, &lut_col, ctx);
+        let result = self.blind_array_access(&lwe_line, &lut_col, ctx);
 
         // FIXME: half result may behave weirdly
-        result.as_mut().iter_mut().for_each(|x| *x /= 2);
+        // result.as_mut().iter_mut().for_each(|x| *x /= 2);
         return result;
     }
 
@@ -1271,6 +1279,16 @@ impl PublicKey {
 
     pub fn blind_argmax(&self, lut: LUT, ctx: &Context) -> LWE {
         self.blind_kmin(lut, ctx, ctx.full_message_modulus() - 1)
+    }
+
+    pub fn blind_lt_bma_mv(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
+        let n = ctx.full_message_modulus;
+        let matrix = Vec::from_iter(
+            (0..n).map(|lin| Vec::from_iter((0..n).map(|col| if lin < col { 1 } else { 0 }))),
+        );
+        let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
+        let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
+        self.blind_array_access(&twice_bit, &lut, &ctx)
     }
 
     // TODO : a revoir
@@ -1520,6 +1538,34 @@ impl PublicKey {
         let vec_lwe = vec![lwe1, lwe2];
         let lut = LUT::from_vec_of_lwe(&vec_lwe, self, ctx);
         self.blind_array_access(&selector, &lut, ctx)
+    }
+
+    // Blind selection of a data from a list of private data, with a list of private selector ( a la OT)
+    pub fn blind_selection(&self, vec_lwe: &[LWE], vec_selector: &[LWE], ctx: &Context) -> LWE {
+        let mut acc = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        vec_lwe
+            .iter()
+            .zip(vec_selector.iter())
+            .for_each(|(lwe, selector)| {
+                lwe_ciphertext_add_assign(
+                    &mut acc,
+                    &self.lwe_mul_encrypted_bit(&lwe, &selector, ctx),
+                );
+            });
+        acc
+    }
+
+    // Private selection of a data from a list of public data, with a list of private selector ( a la PIR)
+    pub fn private_selection(&self, data: &[u64], vec_selector: &[LWE], ctx: &Context) -> LWE {
+        let mut acc = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        data.iter()
+            .zip(vec_selector.iter())
+            .for_each(|(d, selector)| {
+                let mut d_or_zero = selector.clone();
+                lwe_ciphertext_cleartext_mul_assign(&mut d_or_zero, Cleartext(*d));
+                lwe_ciphertext_add_assign(&mut acc, &d_or_zero);
+            });
+        acc
     }
 }
 
@@ -1959,6 +2005,7 @@ mod test {
 
     use itertools::Itertools;
     use quickcheck::TestResult;
+    use rand::seq::SliceRandom;
     use tfhe::shortint::parameters::*;
 
     use super::*;
@@ -2067,7 +2114,7 @@ mod test {
         let lwe_identity = public_key.blind_array_access(&mut lwe1, &identity, &ctx);
 
         lwe_ciphertext_add_assign(&mut lwe1, &lwe_identity);
-        let plaintext = decrypt_lwe_ciphertext(private_key.get_small_lwe_sk(), &lwe1);
+        let plaintext = decrypt_lwe_ciphertext(&private_key.get_big_lwe_sk(), &lwe1);
         let decrypted = plaintext.0 / ctx.delta();
         println!("decrypted: {}", decrypted);
     }
@@ -2919,6 +2966,84 @@ mod test {
                 // Decrypt and verify result
                 let decrypted = private_key.decrypt_lwe(&result, &ctx);
                 assert_eq!(decrypted, expected % ctx.message_modulus().0 as u64);
+            }
+        }
+    }
+
+    #[test]
+    fn test_blind_selection() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let mut vec_to_select = (0..ctx.message_modulus().0 as u64).collect::<Vec<_>>();
+        vec_to_select.shuffle(&mut rand::thread_rng());
+
+        let vec_lwe = vec_to_select
+            .iter()
+            .map(|x| private_key.allocate_and_encrypt_lwe(*x, &mut ctx))
+            .collect::<Vec<_>>();
+
+        for index_to_select in 0..ctx.message_modulus().0 as u64 {
+            let mut vec_selector = vec![0u64; ctx.message_modulus().0 as usize];
+            vec_selector[index_to_select as usize] = 1;
+            let encrypted_selector = vec_selector
+                .iter()
+                .map(|x| private_key.allocate_and_encrypt_lwe(*x, &mut ctx))
+                .collect::<Vec<_>>();
+
+            let selected = public_key.blind_selection(&vec_lwe, &encrypted_selector, &ctx);
+
+            let expected = vec_to_select[index_to_select as usize];
+
+            let actual = private_key.decrypt_lwe(&selected, &ctx);
+            println!("expected: {}, actual: {}", expected, actual);
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn test_private_selection() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let mut data = (0..ctx.message_modulus().0 as u64).collect::<Vec<_>>();
+        data.shuffle(&mut rand::thread_rng());
+
+        for index_to_select in 0..ctx.message_modulus().0 as u64 {
+            let mut vec_selector = vec![0u64; ctx.message_modulus().0 as usize];
+            vec_selector[index_to_select as usize] = 1;
+            let encrypted_selector = vec_selector
+                .iter()
+                .map(|x| private_key.allocate_and_encrypt_lwe(*x, &mut ctx))
+                .collect::<Vec<_>>();
+
+            let selected = public_key.private_selection(&data, &encrypted_selector, &ctx);
+
+            let expected = data[index_to_select as usize];
+
+            let actual = private_key.decrypt_lwe(&selected, &ctx);
+            println!("expected: {}, actual: {}", expected, actual);
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn test_blind_lt_bma_mv() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        for a in 0..ctx.full_message_modulus() - 1 {
+            for b in 0..ctx.full_message_modulus() - 1 {
+                let lwe_a = private_key.allocate_and_encrypt_lwe(a as u64, &mut ctx);
+                let lwe_b = private_key.allocate_and_encrypt_lwe(b as u64, &mut ctx);
+
+                let lwe_bit = public_key.blind_lt_bma_mv(&lwe_a, &lwe_b, &ctx);
+                let actual = private_key.decrypt_lwe(&lwe_bit, &ctx);
+                println!("a={}, b={}, actual={}", a, b, actual);
+                assert_eq!(actual, (a < b) as u64);
             }
         }
     }
