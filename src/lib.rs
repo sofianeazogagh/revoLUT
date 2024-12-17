@@ -866,6 +866,21 @@ impl PublicKey {
         not_lwe
     }
 
+    // res = LWE1 + scalar * LWE2
+    pub fn lwe_mul_add(&self, lwe1: &LWE, lwe2: &LWE, scalar: u64) -> LWE {
+        let mut res = lwe2.clone();
+        lwe_ciphertext_cleartext_mul_assign(&mut res, Cleartext(scalar)); // res = scalar * lwe2
+        lwe_ciphertext_add_assign(&mut res, lwe1);
+        res
+    }
+
+    // LWE = LWE + scalar * LWE
+    pub fn lwe_mul_add_assign(&self, lwe: &mut LWE, scalar: u64) {
+        let mut res = lwe.clone();
+        lwe_ciphertext_cleartext_mul_assign(&mut res, Cleartext(scalar)); // res = scalar * lwe
+        lwe_ciphertext_add_assign(lwe, &res);
+    }
+
     /// Reduce the plaintext modulus in `ct` from `big_modulus` to `message_modulus`.
     pub fn lower_precision(&self, ct: &mut LWE, ctx: &Context, big_modulus: u64) {
         let small_delta = (1u64 << 63) / big_modulus;
@@ -2006,7 +2021,7 @@ mod test {
     use itertools::Itertools;
     use quickcheck::TestResult;
     use rand::seq::SliceRandom;
-    use tfhe::shortint::parameters::*;
+    use tfhe::{boolean::public_key, shortint::parameters::*};
 
     use super::*;
 
@@ -2118,6 +2133,34 @@ mod test {
         let decrypted = plaintext.0 / ctx.delta();
         println!("decrypted: {}", decrypted);
     }
+
+    #[test]
+    fn test_lwe_mul_add_assign() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        // Test values
+        let input: u64 = 1;
+        let scalar: u64 = 2;
+
+        // Encrypt input
+        let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
+
+        // Perform scalar multiplication and addition
+        public_key.lwe_mul_add_assign(&mut lwe, scalar);
+
+        // Decrypt result
+        let clear = private_key.decrypt_lwe(&lwe, &mut ctx);
+
+        println!("Test lwe_mul_add_assign");
+        println!("input: {}", input);
+        println!("scalar: {}", scalar);
+        println!("decrypted result: {}", clear);
+
+        assert_eq!(clear, input + (scalar * input));
+    }
+
     #[test]
     fn test_lut_enc() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
