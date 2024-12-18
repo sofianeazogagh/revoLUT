@@ -928,8 +928,18 @@ impl PublicKey {
         self.blind_array_access(&ct_input, &cmp_scalar_accumulator, ctx)
     }
 
+    pub fn lt_scalar(&self, ct_input: &LWE, scalar: u64, ctx: &Context) -> LWE {
+        let cmp_scalar_accumulator = LUT::from_function(|x| (x < scalar as u64) as u64, ctx);
+        self.blind_array_access(&ct_input, &cmp_scalar_accumulator, ctx)
+    }
+
     pub fn geq_scalar(&self, ct_input: &LWE, scalar: u64, ctx: &Context) -> LWE {
         let cmp_scalar_accumulator = LUT::from_function(|x| (x >= scalar) as u64, ctx);
+        self.blind_array_access(&ct_input, &cmp_scalar_accumulator, ctx)
+    }
+
+    pub fn gt_scalar(&self, ct_input: &LWE, scalar: u64, ctx: &Context) -> LWE {
+        let cmp_scalar_accumulator = LUT::from_function(|x| (x > scalar as u64) as u64, ctx);
         self.blind_array_access(&ct_input, &cmp_scalar_accumulator, ctx)
     }
 
@@ -2132,6 +2142,36 @@ mod test {
         let plaintext = decrypt_lwe_ciphertext(&private_key.get_big_lwe_sk(), &lwe1);
         let decrypted = plaintext.0 / ctx.delta();
         println!("decrypted: {}", decrypted);
+    }
+
+    #[test]
+    fn test_lwe_mul_add() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        // Test values
+        let input1: u64 = 1;
+        let input2: u64 = 0;
+        let scalar: u64 = 2;
+
+        // Encrypt input
+        let lwe1 = private_key.allocate_and_encrypt_lwe(input1, &mut ctx);
+        let lwe2 = private_key.allocate_and_encrypt_lwe(input2, &mut ctx);
+
+        // Perform scalar multiplication and addition
+        let res = public_key.lwe_mul_add(&lwe1, &lwe2, scalar);
+
+        // Decrypt result
+        let clear = private_key.decrypt_lwe(&res, &mut ctx);
+
+        println!("Test lwe_mul_add_assign");
+        println!("input1: {}", input1);
+        println!("input2: {}", input2);
+        println!("scalar: {}", scalar);
+        println!("decrypted result: {}", clear);
+
+        assert_eq!(clear, input1 + (scalar * input2));
     }
 
     #[test]
