@@ -30,9 +30,9 @@ use rand::Rng;
 mod blind_sort;
 mod blind_topk;
 
-type LWE = LweCiphertext<Vec<u64>>;
-type GLWE = GlweCiphertext<Vec<u64>>;
-type Poly = Polynomial<Vec<u64>>;
+pub type LWE = LweCiphertext<Vec<u64>>;
+pub type GLWE = GlweCiphertext<Vec<u64>>;
+pub type Poly = Polynomial<Vec<u64>>;
 
 pub fn random_lut(param: ClassicPBSParameters) -> LUT {
     let size = param.message_modulus.0;
