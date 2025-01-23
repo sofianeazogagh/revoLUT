@@ -10,13 +10,14 @@ use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::{fs, io};
+use tfhe::integer::ciphertext::BaseRadixCiphertext;
 // use std::process::Output;
 use std::sync::OnceLock;
 use std::time::Instant;
-use tfhe::shortint::{CarryModulus, MessageModulus};
+use tfhe::shortint::{CarryModulus, Ciphertext, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
-use tfhe::shortint::parameters::ClassicPBSParameters;
+use tfhe::shortint::parameters::{ClassicPBSParameters, Degree, NoiseLevel};
 use tfhe::shortint::prelude::CiphertextModulus;
 
 // Fast Fourier Transform
@@ -1492,7 +1493,7 @@ impl PublicKey {
         switched
     }
 
-    /// returns the ciphertext at index i from the given lut, accounting for redundancy
+    /// returns the ciphertext at index i from the given lut, accounting for redundancya
     pub fn lut_extract(&self, lut: &LUT, i: usize, ctx: &Context) -> LWE {
         self.glwe_extract(&lut.0, i * ctx.box_size, ctx)
     }
@@ -1591,6 +1592,20 @@ impl PublicKey {
                 lwe_ciphertext_add_assign(&mut acc, &d_or_zero);
             });
         acc
+    }
+
+    pub fn to_shortint_ciphertext(&self, lwe: LWE, ctx: &Context) -> Ciphertext {
+        let ct = Ciphertext::new(
+            lwe,
+            Degree::new(ctx.parameters().message_modulus.0 - 1),
+            NoiseLevel::NOMINAL,
+            // ctx.parameters().message_modulus,
+            MessageModulus(4),
+            // ctx.parameters().carry_modulus,
+            CarryModulus(4),
+            PBSOrder::KeyswitchBootstrap,
+        );
+        ct
     }
 }
 
@@ -2028,12 +2043,118 @@ impl LUTStack {
 mod test {
     use std::time::Instant;
 
+    use super::*;
     use itertools::Itertools;
     use quickcheck::TestResult;
     use rand::seq::SliceRandom;
+    use tfhe::boolean::server_key;
+    use tfhe::integer::ciphertext::BaseCrtCiphertext;
+    use tfhe::integer::ciphertext::BaseRadixCiphertext;
+    use tfhe::integer::ClientKey as IntegerClientKey;
+    use tfhe::integer::CrtClientKey;
+    use tfhe::integer::IntegerCiphertext;
+    use tfhe::integer::ServerKey as IntegerServerKey;
     use tfhe::shortint::parameters::*;
+    use tfhe::shortint::ClientKey as ShortintClientKey;
+    #[test]
+    fn test_radix_representation() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        // let private_key = PrivateKey::new(&mut ctx);
+        let public_key = &private_key.public_key;
 
-    use super::*;
+        let params: ClassicPBSParameters = ClassicPBSParameters {
+            message_modulus: MessageModulus(4),
+            carry_modulus: CarryModulus(4),
+            ..PARAM_MESSAGE_4_CARRY_0
+        };
+
+        let shortint_client_key = ShortintClientKey::from_raw_parts(
+            private_key.get_glwe_sk().clone(),
+            private_key.get_small_lwe_sk().clone(),
+            // ctx.parameters.into(),
+            params.into(),
+        );
+        let integer_client_key = IntegerClientKey::from(shortint_client_key);
+        let integer_server_key = IntegerServerKey::new_radix_server_key(&integer_client_key);
+        let lwe0 = public_key.allocate_and_trivially_encrypt_lwe(0, &ctx);
+        let ct0 = public_key.to_shortint_ciphertext(lwe0, &ctx);
+
+        let mut ciphertexts = vec![];
+
+        let msg = 2u64;
+        for _ in 0..10 {
+            let lwe = private_key.allocate_and_encrypt_lwe(msg, &mut ctx);
+            let ct = public_key.to_shortint_ciphertext(lwe, &ctx);
+            ciphertexts.push(BaseRadixCiphertext::from_blocks(vec![ct, ct0.clone()]));
+        }
+
+        let decrypted_values: Vec<u64> = ciphertexts
+            .iter()
+            .map(|ct| integer_client_key.decrypt_radix(&ct))
+            .collect();
+
+        for (i, value) in decrypted_values.iter().enumerate() {
+            println!("Decrypted value {}: {}", i + 1, value);
+        }
+
+        // let res = integer_server_key.add_parallelized(&ct1_big_int, &ct2_big_int);
+
+        let mut res = BaseRadixCiphertext::from_blocks(vec![ct0.clone(), ct0.clone()]);
+        ciphertexts
+            .iter()
+            .for_each(|ct| integer_server_key.add_assign_parallelized(&mut res, &ct));
+
+        let res_dec: u64 = integer_client_key.decrypt_radix(&res);
+
+        println!("res_dec: {}", res_dec);
+    }
+
+    #[test]
+    fn test_crt_representation() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        // let private_key = PrivateKey::new(&mut ctx);
+        let msg1 = 1u64;
+        let msg2 = 0u64;
+        let lwe1 = private_key.allocate_and_encrypt_lwe(msg1, &mut ctx);
+        let lwe2 = private_key.allocate_and_encrypt_lwe(msg2, &mut ctx);
+        let public_key = &private_key.public_key;
+        let ct1 = public_key.to_shortint_ciphertext(lwe1, &ctx);
+        let ct2 = public_key.to_shortint_ciphertext(lwe2, &ctx);
+
+        let shortint_client_key = ShortintClientKey::from_raw_parts(
+            private_key.get_glwe_sk().clone(),
+            private_key.get_small_lwe_sk().clone(),
+            ctx.parameters.into(),
+        );
+
+        let integer_client_key = IntegerClientKey::from(shortint_client_key);
+        let crt_client_key = CrtClientKey::from((integer_client_key.clone(), vec![2, 3]));
+        let integer_server_key = IntegerServerKey::new_crt_server_key(&crt_client_key);
+        // let lwe0 = public_key.allocate_and_trivially_encrypt_lwe(2, &ctx);
+        // let ct0 = public_key.to_shortint_ciphertext(lwe0, &ctx);
+
+        // let blocks_1 = vec![ct1, ct0.clone()]; // 1 mod 2, 2 mod 3 = 5
+        let blocks_1 = vec![ct1, ct2]; // 1 mod 3, 1 mod 5
+                                       // let blocks_2 = vec![ct2, ct0.clone()]; // 1 mod 2, 2 mod 3 = 5
+        let mut ct1_big_int = BaseCrtCiphertext::from_blocks(blocks_1);
+        // let mut ct2_big_int = BaseCrtCiphertext::from_blocks(blocks_2);
+
+        // let is_possible =
+        //     integer_server_key.is_crt_add_possible(&mut ct1_big_int, &mut ct2_big_int);
+        // println!("is_possible: {:?}", is_possible);
+
+        // let res = integer_server_key.smart_crt_add(&mut ct1_big_int, &mut ct2_big_int);
+        // let res_dec: u64 = crt_client_key.decrypt(&res);
+
+        let ct1_dec: u64 = integer_client_key.decrypt_crt(&ct1_big_int);
+        // let ct2_dec: u64 = integer_client_key.decrypt_crt(&ct2_big_int);
+
+        println!("ct1_dec: {}", ct1_dec);
+        // println!("ct2_dec: {}", ct2_dec);
+        // println!("res_dec: {}", res_dec);
+    }
 
     #[test]
     fn test_lwe_add() {
