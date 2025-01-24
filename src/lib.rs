@@ -17,8 +17,12 @@ use std::time::Instant;
 use tfhe::shortint::{CarryModulus, Ciphertext, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
+use tfhe::integer::{
+    ClientKey as IntegerClientKey, IntegerCiphertext, RadixClientKey, ServerKey as IntegerServerKey,
+};
 use tfhe::shortint::parameters::{ClassicPBSParameters, Degree, NoiseLevel};
 use tfhe::shortint::prelude::CiphertextModulus;
+use tfhe::shortint::ClientKey as ShortintClientKey;
 
 // Fast Fourier Transform
 use concrete_fft::c64;
@@ -242,6 +246,7 @@ pub struct PrivateKey {
     // big_lwe_sk: LweSecretKey<Vec<u64>>,
     glwe_sk: GlweSecretKey<Vec<u64>>,
     pub public_key: PublicKey,
+    pub integer_key: IntegerClientKey,
 }
 
 impl PrivateKey {
@@ -383,11 +388,24 @@ impl PrivateKey {
         );
         println!("{:?}", Instant::now() - start);
 
+        let params = ClassicPBSParameters {
+            message_modulus: MessageModulus(4),
+            carry_modulus: CarryModulus(4),
+            ..ctx.parameters()
+        };
+
+        let shortint_client_key =
+            ShortintClientKey::from_raw_parts(glwe_sk.clone(), lwe_sk.clone(), params.into());
+
+        let integer_client_key = IntegerClientKey::from(shortint_client_key);
+        let integer_server_key = IntegerServerKey::new_radix_server_key(&integer_client_key);
+
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
             pfpksk,
             packing_ksk,
+            integer_key: integer_server_key,
         };
 
         PrivateKey {
@@ -395,6 +413,7 @@ impl PrivateKey {
             // big_lwe_sk,
             glwe_sk,
             public_key,
+            integer_key: integer_client_key,
         }
     }
 
@@ -815,6 +834,14 @@ impl PrivateKey {
         }
         println!("{:?}", result);
     }
+
+    pub fn decrypt_radix_ciphertext(
+        &self,
+        ct: &BaseRadixCiphertext<tfhe::shortint::Ciphertext>,
+    ) -> u64 {
+        let client_key_radix = RadixClientKey::from((self.integer_key.clone(), 4));
+        client_key_radix.decrypt(ct)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -824,6 +851,7 @@ pub struct PublicKey {
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
     pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub packing_ksk: LwePackingKeyswitchKey<Vec<u64>>,
+    pub integer_key: IntegerServerKey,
 }
 
 impl PublicKey {
@@ -1607,6 +1635,34 @@ impl PublicKey {
         );
         ct
     }
+
+    pub fn lwe_add_into_radix_ciphertext(
+        &self,
+        ciphertexts: Vec<LWE>,
+        input_precision: usize,
+        ctx: &Context,
+        private_key: &PrivateKey,
+    ) -> BaseRadixCiphertext<tfhe::shortint::Ciphertext> {
+        let ct0 = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+
+        let ct0_shorting = self.to_shortint_ciphertext(ct0.clone(), ctx);
+        let mut accumulator = BaseRadixCiphertext::from_blocks(vec![
+            ct0_shorting.clone(),
+            ct0_shorting.clone(),
+            ct0_shorting.clone(),
+            ct0_shorting.clone(),
+        ]);
+
+        ciphertexts.into_iter().for_each(|ct| {
+            let ct_shorting = self.to_shortint_ciphertext(ct, ctx);
+            let ct_integer =
+                BaseRadixCiphertext::from_blocks(vec![ct_shorting, ct0_shorting.clone()]);
+            self.integer_key
+                .add_assign_parallelized(&mut accumulator, &ct_integer);
+        });
+
+        accumulator
+    }
 }
 
 #[derive(Clone)]
@@ -2041,6 +2097,7 @@ impl LUTStack {
 
 #[cfg(test)]
 mod test {
+    use core::num;
     use std::time::Instant;
 
     use super::*;
@@ -2050,14 +2107,41 @@ mod test {
     use tfhe::boolean::server_key;
     use tfhe::integer::ciphertext::BaseCrtCiphertext;
     use tfhe::integer::ciphertext::BaseRadixCiphertext;
+    use tfhe::integer::client_key;
+    use tfhe::integer::gen_keys_radix;
     use tfhe::integer::ClientKey as IntegerClientKey;
     use tfhe::integer::CrtClientKey;
     use tfhe::integer::IntegerCiphertext;
+    use tfhe::integer::RadixClientKey;
     use tfhe::integer::ServerKey as IntegerServerKey;
     use tfhe::shortint::parameters::*;
     use tfhe::shortint::ClientKey as ShortintClientKey;
+
+    #[test]
+    fn test_radix() {
+        let precision = 64;
+        let msg = 7u64;
+        let input_precision = msg;
+
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        // let private_key = PrivateKey::new(&mut ctx);
+        let public_key = &private_key.public_key;
+        let mut ciphertexts = vec![];
+        for _ in 0..5 {
+            let lwe = private_key.allocate_and_encrypt_lwe(msg, &mut ctx);
+            ciphertexts.push(lwe);
+        }
+
+        let result =
+            public_key.lwe_add_into_radix_ciphertext(ciphertexts, precision, &ctx, &private_key);
+        let output = private_key.decrypt_radix_ciphertext(&result);
+        println!("output: {}", output);
+    }
+
     #[test]
     fn test_radix_representation() {
+        let num_block = 2;
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
         // let private_key = PrivateKey::new(&mut ctx);
@@ -2083,7 +2167,7 @@ mod test {
         let mut ciphertexts = vec![];
 
         let msg = 2u64;
-        for _ in 0..10 {
+        for _ in 0..5 {
             let lwe = private_key.allocate_and_encrypt_lwe(msg, &mut ctx);
             let ct = public_key.to_shortint_ciphertext(lwe, &ctx);
             ciphertexts.push(BaseRadixCiphertext::from_blocks(vec![ct, ct0.clone()]));
@@ -2094,20 +2178,27 @@ mod test {
             .map(|ct| integer_client_key.decrypt_radix(&ct))
             .collect();
 
-        for (i, value) in decrypted_values.iter().enumerate() {
-            println!("Decrypted value {}: {}", i + 1, value);
-        }
-
-        // let res = integer_server_key.add_parallelized(&ct1_big_int, &ct2_big_int);
-
-        let mut res = BaseRadixCiphertext::from_blocks(vec![ct0.clone(), ct0.clone()]);
+        let mut res = BaseRadixCiphertext::from_blocks(vec![
+            ct0.clone(),
+            ct0.clone(),
+            ct0.clone(),
+            ct0.clone(),
+        ]);
         ciphertexts
             .iter()
             .for_each(|ct| integer_server_key.add_assign_parallelized(&mut res, &ct));
 
-        let res_dec: u64 = integer_client_key.decrypt_radix(&res);
+        let client_key_radix = RadixClientKey::from((integer_client_key.clone(), 2));
+        let modulus = client_key_radix
+            .parameters()
+            .message_modulus()
+            .0
+            .pow(num_block as u32) as u64;
+        let output: u64 = client_key_radix.decrypt(&res);
 
-        println!("res_dec: {}", res_dec);
+        // println!("Decrypted value: {}", output);
+        // let res_dec: u64 = integer_client_key.decrypt_radix(&res);
+        // println!("res_dec: {}", res_dec);
     }
 
     #[test]
