@@ -9,8 +9,10 @@ use num_complex::Complex;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
+use std::iter::repeat_n;
 use std::{fs, io};
 use tfhe::integer::ciphertext::BaseRadixCiphertext;
+use tfhe::shortint::backward_compatibility::public_key;
 // use std::process::Output;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -386,7 +388,8 @@ impl PrivateKey {
             ctx.ciphertext_modulus(),
             &mut ctx.encryption_generator,
         );
-        println!("{:?}", Instant::now() - start);
+
+        println!("Generating integer keys ...");
 
         let params = ClassicPBSParameters {
             message_modulus: MessageModulus(4),
@@ -399,6 +402,8 @@ impl PrivateKey {
 
         let integer_client_key = IntegerClientKey::from(shortint_client_key);
         let integer_server_key = IntegerServerKey::new_radix_server_key(&integer_client_key);
+
+        println!("{:?}", Instant::now() - start);
 
         let public_key = PublicKey {
             lwe_ksk,
@@ -1636,30 +1641,55 @@ impl PublicKey {
         ct
     }
 
+    /// Blindly add a list of LWE ciphertexts together and return the result as a BaseRadixCiphertext
+    /// The input precision is the maximum number of bits used to represent each input LWE ciphertext. This is used to
+    /// determine the number of ciphertexts that can be added together in a single block (without overflowing).
+    /// The output precision is the maximum number of bits used to represent the output ciphertext. This is used to determine the
+    /// number of blocks that will be used to represent the output ciphertext.
+
     pub fn lwe_add_into_radix_ciphertext(
         &self,
         ciphertexts: Vec<LWE>,
         input_precision: usize,
+        output_precision: usize,
         ctx: &Context,
-        private_key: &PrivateKey,
     ) -> BaseRadixCiphertext<tfhe::shortint::Ciphertext> {
-        let ct0 = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let num_blocks_output = 2u32.pow(output_precision as u32) / ctx.message_modulus().0 as u32;
 
-        let ct0_shorting = self.to_shortint_ciphertext(ct0.clone(), ctx);
+        let custom_message_modulus = ctx.message_modulus().0 - 1;
+        let batch_size = custom_message_modulus / 2u32.pow(input_precision as u32) as usize;
+
+        let ct0 = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let ct0_shortint = self.to_shortint_ciphertext(ct0.clone(), ctx);
         let mut accumulator = BaseRadixCiphertext::from_blocks(vec![
-            ct0_shorting.clone(),
-            ct0_shorting.clone(),
-            ct0_shorting.clone(),
-            ct0_shorting.clone(),
+            ct0_shortint.clone();
+            num_blocks_output as usize
         ]);
 
-        ciphertexts.into_iter().for_each(|ct| {
-            let ct_shorting = self.to_shortint_ciphertext(ct, ctx);
-            let ct_integer =
-                BaseRadixCiphertext::from_blocks(vec![ct_shorting, ct0_shorting.clone()]);
-            self.integer_key
-                .add_assign_parallelized(&mut accumulator, &ct_integer);
+        let mut lwe_acc = ct0.clone();
+
+        ciphertexts.iter().enumerate().for_each(|(i, ct)| {
+            lwe_ciphertext_add_assign(&mut lwe_acc, ct);
+            if (i + 1) % batch_size == 0 && i > 0 {
+                let ct_shortint = self.to_shortint_ciphertext(lwe_acc.clone(), ctx);
+
+                let mut blocks = vec![ct_shortint];
+                blocks.extend(vec![ct0_shortint.clone(); num_blocks_output as usize - 1]);
+                let ct_integer = BaseRadixCiphertext::from_blocks(blocks);
+                self.integer_key
+                    .add_assign_parallelized(&mut accumulator, &ct_integer);
+                lwe_acc = ct0.clone();
+            }
         });
+
+        // Add the last block
+
+        let ct_shortint = self.to_shortint_ciphertext(lwe_acc.clone(), ctx);
+        let mut blocks = vec![ct_shortint];
+        blocks.extend(vec![ct0_shortint.clone(); num_blocks_output as usize - 1]);
+        let ct_integer = BaseRadixCiphertext::from_blocks(blocks);
+        self.integer_key
+            .add_assign_parallelized(&mut accumulator, &ct_integer);
 
         accumulator
     }
@@ -2118,23 +2148,27 @@ mod test {
     use tfhe::shortint::ClientKey as ShortintClientKey;
 
     #[test]
-    fn test_radix() {
-        let precision = 64;
-        let msg = 7u64;
-        let input_precision = msg;
+    fn test_radixx() {
+        let msg = 1u64;
+        let input_precision = 1; // Number of bits that encode the data in the LWEs. For example, for [5], we need 3 bits.
+        let output_precision = 6; // Number of bits that encode the data in the RadixCiphertext.
 
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
-        // let private_key = PrivateKey::new(&mut ctx);
+
         let public_key = &private_key.public_key;
         let mut ciphertexts = vec![];
-        for _ in 0..5 {
+        for _ in 0..60 {
             let lwe = private_key.allocate_and_encrypt_lwe(msg, &mut ctx);
             ciphertexts.push(lwe);
         }
 
-        let result =
-            public_key.lwe_add_into_radix_ciphertext(ciphertexts, precision, &ctx, &private_key);
+        let result = public_key.lwe_add_into_radix_ciphertext(
+            ciphertexts,
+            input_precision,
+            output_precision,
+            &ctx,
+        );
         let output = private_key.decrypt_radix_ciphertext(&result);
         println!("output: {}", output);
     }
@@ -2144,7 +2178,6 @@ mod test {
         let num_block = 2;
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
-        // let private_key = PrivateKey::new(&mut ctx);
         let public_key = &private_key.public_key;
 
         let params: ClassicPBSParameters = ClassicPBSParameters {
