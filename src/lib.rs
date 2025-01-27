@@ -1643,21 +1643,17 @@ impl PublicKey {
 
     /// Blindly add a list of LWE ciphertexts together and return the result as a BaseRadixCiphertext
     /// The input precision is the maximum number of bits used to represent each input LWE ciphertext. This is used to
-    /// determine the number of ciphertexts that can be added together in a single block (without overflowing).
-    /// The output precision is the maximum number of bits used to represent the output ciphertext. This is used to determine the
-    /// number of blocks that will be used to represent the output ciphertext.
+    /// determine the number of ciphertexts that can be added together in a single LWE (without overflowing).
 
     pub fn lwe_add_into_radix_ciphertext(
         &self,
         ciphertexts: Vec<LWE>,
         input_precision: usize,
-        output_precision: usize,
         ctx: &Context,
     ) -> BaseRadixCiphertext<tfhe::shortint::Ciphertext> {
-        let num_blocks_output = 2u32.pow(output_precision as u32) / ctx.message_modulus().0 as u32;
-
-        let custom_message_modulus = ctx.message_modulus().0 - 1;
-        let batch_size = custom_message_modulus / 2u32.pow(input_precision as u32) as usize;
+        let output_precision = (ciphertexts.len().ilog2() + input_precision as u32) as usize; // The precision (in bits) of the radix output
+        let num_blocks_output = 2u32.pow(output_precision as u32) / ctx.message_modulus().0 as u32; // The number of blocks in the radix output
+        let batch_size = ctx.message_modulus().0 / 2u32.pow(input_precision as u32) as usize; // The number of ciphertexts that can be added together in a single LWE
 
         let ct0 = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let ct0_shortint = self.to_shortint_ciphertext(ct0.clone(), ctx);
@@ -1666,30 +1662,31 @@ impl PublicKey {
             num_blocks_output as usize
         ]);
 
-        let mut lwe_acc = ct0.clone();
+        let total_chunks = ciphertexts.len().div_ceil(batch_size);
+        let ct_integers = (0..total_chunks)
+            .into_par_iter()
+            .map(|chunk_index| {
+                let start = chunk_index * batch_size;
+                let end = (start + batch_size).min(ciphertexts.len());
 
-        ciphertexts.iter().enumerate().for_each(|(i, ct)| {
-            lwe_ciphertext_add_assign(&mut lwe_acc, ct);
-            if (i + 1) % batch_size == 0 && i > 0 {
-                let ct_shortint = self.to_shortint_ciphertext(lwe_acc.clone(), ctx);
+                let mut local_acc = ct0.clone();
+                ciphertexts[start..end].iter().for_each(|ct| {
+                    lwe_ciphertext_add_assign(&mut local_acc, ct);
+                });
 
+                let ct_shortint = self.to_shortint_ciphertext(local_acc, ctx);
                 let mut blocks = vec![ct_shortint];
                 blocks.extend(vec![ct0_shortint.clone(); num_blocks_output as usize - 1]);
                 let ct_integer = BaseRadixCiphertext::from_blocks(blocks);
-                self.integer_key
-                    .add_assign_parallelized(&mut accumulator, &ct_integer);
-                lwe_acc = ct0.clone();
-            }
-        });
 
-        // Add the last block
+                ct_integer
+            })
+            .collect::<Vec<_>>();
 
-        let ct_shortint = self.to_shortint_ciphertext(lwe_acc.clone(), ctx);
-        let mut blocks = vec![ct_shortint];
-        blocks.extend(vec![ct0_shortint.clone(); num_blocks_output as usize - 1]);
-        let ct_integer = BaseRadixCiphertext::from_blocks(blocks);
-        self.integer_key
-            .add_assign_parallelized(&mut accumulator, &ct_integer);
+        for ct_integer in ct_integers {
+            self.integer_key
+                .add_assign_parallelized(&mut accumulator, &ct_integer);
+        }
 
         accumulator
     }
@@ -2150,25 +2147,19 @@ mod test {
     #[test]
     fn test_radixx() {
         let msg = 1u64;
-        let input_precision = 1; // Number of bits that encode the data in the LWEs. For example, for [5], we need 3 bits.
-        let output_precision = 6; // Number of bits that encode the data in the RadixCiphertext.
+        let input_precision = 1; // Number of bits that encode the data in the LWEs. For example, for LWE(5), we need 3 bits.
 
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
 
         let public_key = &private_key.public_key;
         let mut ciphertexts = vec![];
-        for _ in 0..60 {
+        for _ in 0..150 {
             let lwe = private_key.allocate_and_encrypt_lwe(msg, &mut ctx);
             ciphertexts.push(lwe);
         }
 
-        let result = public_key.lwe_add_into_radix_ciphertext(
-            ciphertexts,
-            input_precision,
-            output_precision,
-            &ctx,
-        );
+        let result = public_key.lwe_add_into_radix_ciphertext(ciphertexts, input_precision, &ctx);
         let output = private_key.decrypt_radix_ciphertext(&result);
         println!("output: {}", output);
     }
