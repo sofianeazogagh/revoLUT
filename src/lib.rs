@@ -1662,7 +1662,6 @@ impl PublicKey {
         ciphertexts: Vec<LWE>,
         input_precision: usize,
         ctx: &Context,
-        private_key: &PrivateKey,
     ) -> BaseRadixCiphertext<tfhe::shortint::Ciphertext> {
         let output_precision = (ciphertexts.len().ilog2() + input_precision as u32) as usize; // The precision (in bits) of the radix output
 
@@ -2194,12 +2193,7 @@ mod test {
             ciphertexts.push(lwe);
         }
 
-        let result = public_key.lwe_add_into_radix_ciphertext(
-            ciphertexts,
-            input_precision,
-            &ctx,
-            &private_key,
-        );
+        let result = public_key.lwe_add_into_radix_ciphertext(ciphertexts, input_precision, &ctx);
         let output = private_key.decrypt_radix_ciphertext(&result);
         println!("output: {}", output);
     }
