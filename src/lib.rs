@@ -1633,9 +1633,9 @@ impl PublicKey {
             Degree::new(ctx.parameters().message_modulus.0 - 1),
             NoiseLevel::NOMINAL,
             // ctx.parameters().message_modulus,
-            MessageModulus(16),
+            MessageModulus(4),
             // ctx.parameters().carry_modulus,
-            CarryModulus(2),
+            CarryModulus(4),
             PBSOrder::KeyswitchBootstrap,
         );
         ct
@@ -1662,10 +1662,26 @@ impl PublicKey {
         ciphertexts: Vec<LWE>,
         input_precision: usize,
         ctx: &Context,
+        private_key: &PrivateKey,
     ) -> BaseRadixCiphertext<tfhe::shortint::Ciphertext> {
         let output_precision = (ciphertexts.len().ilog2() + input_precision as u32) as usize; // The precision (in bits) of the radix output
-        let num_blocks_output = 2u32.pow(output_precision as u32) / ctx.message_modulus().0 as u32; // The number of blocks in the radix output
-        let batch_size = ctx.message_modulus().0 / 2u32.pow(input_precision as u32) as usize; // The number of ciphertexts that can be added together in a single LWE
+
+        let num_blocks_output = 2u32
+            .pow(output_precision as u32)
+            .ilog(self.integer_key.message_modulus().0 as u32)
+            + 1; // The number of blocks in the radix output
+
+        let mut batch_size =
+            ctx.message_modulus().0 / (2u32.pow(input_precision as u32) as usize - 1) - 1; // The number of ciphertexts that can be added together in a single LWE
+
+        // let mut batch_size = 7;
+        if batch_size < 1 {
+            batch_size = 1;
+        }
+
+        // println!("Batchsize : {:?}", batch_size);
+        // println!("Output precision : {:?}", output_precision);
+        // println!("Num blocks output : {:?}", num_blocks_output);
 
         let ct0 = self.allocate_and_trivially_encrypt_lwe(0, ctx);
         let ct0_shortint = self.to_shortint_ciphertext(ct0.clone(), ctx);
@@ -1696,8 +1712,14 @@ impl PublicKey {
             .collect::<Vec<_>>();
 
         for ct_integer in ct_integers {
+            let client_key_radix = RadixClientKey::from((private_key.integer_key.clone(), 4));
+            let mut dec: u64 = client_key_radix.decrypt(&ct_integer);
+            // println!("Value to sum : {:?}", dec);
             self.integer_key
                 .add_assign_parallelized(&mut accumulator, &ct_integer);
+
+            dec = client_key_radix.decrypt(&accumulator);
+            // println!("Result after sum : {:?}", dec);
         }
 
         accumulator
@@ -2167,12 +2189,17 @@ mod test {
 
         let public_key = &private_key.public_key;
         let mut ciphertexts = vec![];
-        for _ in 0..150 {
+        for _ in 0..200 {
             let lwe = private_key.allocate_and_encrypt_lwe(msg, &mut ctx);
             ciphertexts.push(lwe);
         }
 
-        let result = public_key.lwe_add_into_radix_ciphertext(ciphertexts, input_precision, &ctx);
+        let result = public_key.lwe_add_into_radix_ciphertext(
+            ciphertexts,
+            input_precision,
+            &ctx,
+            &private_key,
+        );
         let output = private_key.decrypt_radix_ciphertext(&result);
         println!("output: {}", output);
     }
@@ -2180,14 +2207,14 @@ mod test {
     #[test]
     fn test_radix_representation() {
         let num_block = 2;
-        let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
         let params: ClassicPBSParameters = ClassicPBSParameters {
-            message_modulus: MessageModulus(16),
+            message_modulus: MessageModulus(8),
             carry_modulus: CarryModulus(2),
-            ..PARAM_MESSAGE_5_CARRY_0
+            ..PARAM_MESSAGE_4_CARRY_0
         };
 
         let shortint_client_key = ShortintClientKey::from_raw_parts(
@@ -2203,7 +2230,7 @@ mod test {
 
         let mut ciphertexts = vec![];
 
-        let msg = 20u64;
+        let msg = 10u64;
         for _ in 0..2 {
             let lwe = private_key.allocate_and_encrypt_lwe(msg, &mut ctx);
             let ct = public_key.to_shortint_ciphertext(lwe, &ctx);
