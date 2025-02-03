@@ -1711,13 +1711,13 @@ impl PublicKey {
             .collect::<Vec<_>>();
 
         for ct_integer in ct_integers {
-            let client_key_radix = RadixClientKey::from((private_key.integer_key.clone(), 4));
-            let mut dec: u64 = client_key_radix.decrypt(&ct_integer);
+            // let client_key_radix = RadixClientKey::from((private_key.integer_key.clone(), 4));
+            // let mut dec: u64 = client_key_radix.decrypt(&ct_integer);
             // println!("Value to sum : {:?}", dec);
             self.integer_key
                 .add_assign_parallelized(&mut accumulator, &ct_integer);
 
-            dec = client_key_radix.decrypt(&accumulator);
+            // dec = client_key_radix.decrypt(&accumulator);
             // println!("Result after sum : {:?}", dec);
         }
 
