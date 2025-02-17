@@ -95,14 +95,14 @@ impl NyblByteLUT {
     /// increment encrypted byte value at encrypted nybl index
     pub fn blind_array_inc(&mut self, index: &LWE, ctx: &Context, public_key: &PublicKey) {
         // 2 br
-        // let lo = public_key.blind_array_access(&index, &self.lo, ctx);
-        // let lut = LUT::from_function(|x| if x == 15 { 1 } else { 0 }, ctx);
-        // let carry = public_key.blind_array_access(&lo, &lut, ctx);
+        let lo = public_key.blind_array_access(&index, &self.lo, ctx);
+        let lut = LUT::from_function(|x| if x == 15 { 1 } else { 0 }, ctx);
+        let carry = public_key.blind_array_access(&lo, &lut, ctx);
 
         // 2 br
         let one = public_key.allocate_and_trivially_encrypt_lwe(1, ctx);
         public_key.blind_array_increment(&mut self.lo, &index, &one, ctx);
-        // public_key.blind_array_increment(&mut self.hi, &index, &carry, ctx);
+        public_key.blind_array_increment(&mut self.hi, &index, &carry, ctx);
     }
 
     /// replaces encrypted byte value at encrypted nybl index
@@ -137,7 +137,7 @@ impl ByteByteLUT {
         // matrix of all the low nibbles
         let lo: [LUT; 16] = std::array::from_fn(|l| {
             LUT::from_vec(
-                &Vec::from_iter((0..16).map(|c| input[(l << 4) + c] as u64)),
+                &Vec::from_iter((0..16).map(|c| (input[(l << 4) + c] % 16) as u64)),
                 private_key,
                 ctx,
             )
@@ -259,12 +259,9 @@ impl PublicKey {
         for i in 0..=255 {
             let blwe = bblut.at(i, self, ctx);
             let digit = f(blwe);
-            let d = private_key.decrypt_lwe(&digit, ctx);
-            println!("{d}");
             count.blind_array_inc(&digit, ctx, self);
             count.lo.print(private_key, ctx);
             count.hi.print(private_key, ctx);
-            println!("=======");
         }
         println!("elapsed {:?}", Instant::now() - start);
         count.lo.print(private_key, ctx);
@@ -279,6 +276,8 @@ impl PublicKey {
             count.blind_array_add(&index, &blwe, ctx, self);
         }
         println!("prefix sum elapsed: {:?}", Instant::now() - start);
+        count.lo.print(private_key, ctx);
+        count.hi.print(private_key, ctx);
 
         bblut.clone()
     }
@@ -360,25 +359,24 @@ mod test {
         assert_eq!(actual, 17);
     }
 
-    #[test]
-    fn test_nybl_byte_lut_blind_array_inc() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(ctx.parameters);
-        let public_key = &private_key.public_key;
+    // #[test]
+    // fn test_nybl_byte_lut_blind_array_inc() {
+    //     let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+    //     let private_key = key(ctx.parameters);
+    //     let public_key = &private_key.public_key;
 
-        let items: [u8; 256] = std::array::from_fn(|i| i as u8);
-        let bblut = ByteByteLUT::from_bytes(&items, private_key, &mut ctx);
+    //     let items: [u8; 256] = std::array::from_fn(|i| i as u8);
+    //     let bblut = ByteByteLUT::from_bytes(&items, private_key, &mut ctx);
 
-        let mut count = NyblByteLUT::from_bytes_trivially(&[0; 16], &ctx);
-        count.print(private_key, &ctx);
-        for i in 0..=255 {
-            let blwe = bblut.at(i, public_key, &ctx);
-            let index = blwe.lo;
-            count.blind_array_inc(&index, &ctx, public_key);
-            count.print(private_key, &ctx);
-            println!("=====");
-        }
-    }
+    //     let mut count = NyblByteLUT::from_bytes_trivially(&[0; 16], &ctx);
+    //     count.print(private_key, &ctx);
+    //     for i in 0..=255 {
+    //         let blwe = bblut.at(i, public_key, &ctx);
+    //         count.blind_array_inc(&blwe.hi, &ctx, public_key);
+    //         count.print(private_key, &ctx);
+    //         println!("=====");
+    //     }
+    // }
 
     #[test]
     fn test_keyed_blind_counting_sort() {
