@@ -30,6 +30,7 @@ use rand::Rng;
 
 mod blind_sort;
 mod blind_topk;
+mod radix;
 
 pub type LWE = LweCiphertext<Vec<u64>>;
 pub type GLWE = GlweCiphertext<Vec<u64>>;
@@ -1123,7 +1124,7 @@ impl PublicKey {
     /// Get an element of a `matrix` given it `index_line` and it `index_column`
     pub fn blind_matrix_access(
         &self,
-        matrix: &Vec<LUT>,
+        matrix: &[LUT],
         line: &LWE,
         column: &LWE,
         ctx: &Context,
@@ -1139,6 +1140,37 @@ impl PublicKey {
 
         // final blind array access
         self.blind_array_access(&line, &accumulator_final, ctx)
+    }
+
+    pub fn blind_matrix_add(
+        &self,
+        matrix: &mut [LUT],
+        line: &LWE,
+        column: &LWE,
+        value: &LWE,
+        ctx: &Context,
+    ) {
+        let mut column_lut = LUT::from_lwe(&value, &self, ctx);
+        self.blind_rotation_assign(&self.neg_lwe(line, ctx), &mut column_lut, ctx);
+        for (i, lut) in matrix.iter_mut().enumerate() {
+            let x = self.lut_extract(&column_lut, i, ctx);
+            self.blind_array_increment(lut, &column, &x, ctx);
+        }
+    }
+
+    pub fn blind_matrix_set(
+        &self,
+        matrix: &mut [LUT],
+        line: &LWE,
+        column: &LWE,
+        value: &LWE,
+        ctx: &Context,
+    ) {
+        let current = self.blind_matrix_access(matrix, line, column, ctx);
+        let mut value = value.clone();
+        lwe_ciphertext_sub_assign(&mut value, &current);
+
+        self.blind_matrix_add(matrix, line, column, &value, ctx);
     }
 
     // Prototype not working as expected
@@ -1510,6 +1542,7 @@ impl PublicKey {
         let bootstrapped = self.blind_array_access(ct_input, &identity, ctx);
         *ct_input = bootstrapped;
     }
+
     /// blindly adds x to the i-th box of the given LUT
     /// this process is noisy and the LUT needs bootstrapping before being read
     /// ```ignore
@@ -1521,6 +1554,13 @@ impl PublicKey {
         let neg_i = self.neg_lwe(&i, ctx);
         self.blind_rotation_assign(&neg_i, &mut other, ctx);
         self.glwe_sum_assign(&mut lut.0, &other.0);
+    }
+
+    pub fn blind_array_set(&self, lut: &mut LUT, i: &LWE, x: &LWE, ctx: &Context) {
+        let current = self.blind_array_access(i, lut, ctx);
+        let mut x = x.clone();
+        lwe_ciphertext_sub_assign(&mut x, &current);
+        self.blind_array_increment(lut, i, &x, ctx);
     }
 
     pub fn blind_index(&self, lut: &LUT, x: &LWE, ctx: &Context) -> LWE {
@@ -3251,5 +3291,49 @@ mod test {
                 assert_eq!(actual, (a < b) as u64);
             }
         }
+    }
+
+    // #[test]
+    // fn test_blind_matrix_access() {
+    //     let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+    //     let private_key = key(ctx.parameters);
+    //     let public_key = &private_key.public_key;
+
+    //     let matrix = Vec::from_iter(
+    //         (0..16).map(|_| LUT::from_vec(&Vec::from_iter(0..16), &private_key, &mut ctx)),
+    //     );
+
+    //     for l in 0..16 {
+    //         let line = private_key.allocate_and_encrypt_lwe(l, &mut ctx);
+    //         for c in 0..16 {
+    //             let column = private_key.allocate_and_encrypt_lwe(c, &mut ctx);
+    //             let ciphertext = public_key.blind_matrix_access(&matrix, &line, &column, &ctx);
+    //             let actual = private_key.decrypt_lwe(&ciphertext, &ctx);
+
+    //             println!("({l}, {c}): {actual}");
+
+    //             assert_eq!(actual, c);
+    //         }
+    //     }
+    // }
+
+    #[test]
+    fn test_blind_matrix_add() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let mut matrix =
+            Vec::from_iter((0..16).map(|_| LUT::from_vec(&vec![0; 16], &private_key, &mut ctx)));
+        let line = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
+        let column = private_key.allocate_and_encrypt_lwe(2, &mut ctx);
+        let value = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
+
+        public_key.blind_matrix_add(&mut matrix, &line, &column, &value, &ctx);
+
+        let ciphertext = public_key.blind_matrix_access(&matrix, &line, &column, &ctx);
+        let actual = private_key.decrypt_lwe(&ciphertext, &ctx);
+
+        assert_eq!(actual, 1);
     }
 }
