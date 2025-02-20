@@ -18,7 +18,7 @@ impl ByteLWE {
         Self { lo, hi }
     }
 
-    pub fn from_byte_trivial(input: u8, ctx: &Context, public_key: &PublicKey) -> Self {
+    pub fn from_byte_trivially(input: u8, ctx: &Context, public_key: &PublicKey) -> Self {
         let lo = public_key.allocate_and_trivially_encrypt_lwe(((input >> 0) & 0b1111) as u64, ctx);
         let hi = public_key.allocate_and_trivially_encrypt_lwe(((input >> 4) & 0b1111) as u64, ctx);
         Self { lo, hi }
@@ -39,8 +39,8 @@ pub struct NyblByteLUT {
 
 impl NyblByteLUT {
     pub fn from_bytes(input: &[u8; 16], private_key: &PrivateKey, ctx: &mut Context) -> Self {
-        let los = Vec::from_iter((0..16).map(|i| (input[i] >> 0) as u64));
-        let his = Vec::from_iter((0..16).map(|i| (input[i] >> 4) as u64));
+        let los = Vec::from_iter((0..16).map(|i| ((input[i] >> 0) & 0b1111) as u64));
+        let his = Vec::from_iter((0..16).map(|i| ((input[i] >> 4) & 0b1111) as u64));
         Self {
             lo: LUT::from_vec(&los, private_key, ctx),
             hi: LUT::from_vec(&his, private_key, ctx),
@@ -48,8 +48,8 @@ impl NyblByteLUT {
     }
 
     pub fn from_bytes_trivially(input: &[u8; 16], ctx: &Context) -> Self {
-        let los = Vec::from_iter((0..16).map(|i| (input[i] >> 0) as u64));
-        let his = Vec::from_iter((0..16).map(|i| (input[i] >> 4) as u64));
+        let los = Vec::from_iter((0..16).map(|i| ((input[i] >> 0) & 0b1111) as u64));
+        let his = Vec::from_iter((0..16).map(|i| ((input[i] >> 4) & 0b1111) as u64));
         Self {
             lo: LUT::from_vec_trivially(&los, ctx),
             hi: LUT::from_vec_trivially(&his, ctx),
@@ -105,6 +105,21 @@ impl NyblByteLUT {
         public_key.blind_array_increment(&mut self.hi, &index, &carry, ctx);
     }
 
+    /// decrement encrypted byte value at encrypted nybl index
+    pub fn blind_array_dec(&mut self, index: &LWE, ctx: &Context, public_key: &PublicKey) {
+        // 2 br
+        let lo = public_key.blind_array_access(&index, &self.lo, ctx);
+        let lut = LUT::from_function(|x| if x == 0 { 1 } else { 0 }, ctx);
+        let carry = public_key.blind_array_access(&lo, &lut, ctx);
+        let carry = public_key.neg_lwe(&carry, ctx);
+
+        // 2 br
+        let one = public_key.allocate_and_trivially_encrypt_lwe(1, ctx);
+        let minus_one = public_key.neg_lwe(&one, ctx);
+        public_key.blind_array_increment(&mut self.lo, &index, &minus_one, ctx);
+        public_key.blind_array_increment(&mut self.hi, &index, &carry, ctx);
+    }
+
     /// replaces encrypted byte value at encrypted nybl index
     pub fn blind_array_set(
         &mut self,
@@ -145,7 +160,7 @@ impl ByteByteLUT {
         // matrix of all the high nibbles
         let hi: [LUT; 16] = std::array::from_fn(|l| {
             LUT::from_vec(
-                &Vec::from_iter((0..16).map(|c| (input[(l << 4) + c] >> 4) as u64)),
+                &Vec::from_iter((0..16).map(|c| ((input[(l << 4) + c] >> 4) % 16) as u64)),
                 private_key,
                 ctx,
             )
@@ -153,9 +168,37 @@ impl ByteByteLUT {
         Self { lo, hi }
     }
 
+    pub fn from_bytes_trivially(input: &[u8; 256], ctx: &Context) -> Self {
+        // matrix of all the low nibbles
+        let lo: [LUT; 16] = std::array::from_fn(|l| {
+            LUT::from_vec_trivially(
+                &Vec::from_iter((0..16).map(|c| (input[(l << 4) + c] % 16) as u64)),
+                ctx,
+            )
+        });
+        // matrix of all the high nibbles
+        let hi: [LUT; 16] = std::array::from_fn(|l| {
+            LUT::from_vec_trivially(
+                &Vec::from_iter((0..16).map(|c| ((input[(l << 4) + c] >> 4) % 16) as u64)),
+                ctx,
+            )
+        });
+        Self { lo, hi }
+    }
+
+    pub fn print(&self, public_key: &PublicKey, private_key: &PrivateKey, ctx: &Context) {
+        let mut result = vec![];
+        for i in 0x00..=0xff {
+            let blwe = self.at(i, public_key, ctx);
+            let byte = blwe.to_byte(ctx, private_key);
+            result.push(byte);
+        }
+        println!("{:02X?}", result);
+    }
+
     pub fn at(&self, index: u8, public_key: &PublicKey, ctx: &Context) -> ByteLWE {
-        let hi = index >> 4;
-        let lo = index % 16;
+        let hi = (index >> 4) % 16;
+        let lo = (index >> 0) % 16;
         ByteLWE {
             lo: public_key.lut_extract(&self.lo[hi as usize], lo as usize, ctx),
             hi: public_key.lut_extract(&self.hi[hi as usize], lo as usize, ctx),
@@ -249,16 +292,18 @@ impl PublicKey {
     pub fn keyed_blind_counting_sort(
         &self,
         bblut: &ByteByteLUT,
-        f: fn(ByteLWE) -> LWE,
+        f: fn(&ByteLWE) -> LWE,
         ctx: &Context,
     ) -> ByteByteLUT {
         let private_key = key(ctx.parameters);
         let mut count = NyblByteLUT::from_bytes_trivially(&[0; 16], ctx);
-        // count values
+        // count values (~17s)
         let start = Instant::now();
-        for i in 0..=255 {
+        for i in 0x00..=0xff {
             let blwe = bblut.at(i, self, ctx);
-            let digit = f(blwe);
+            let byte = blwe.to_byte(ctx, private_key);
+            println!("{byte:02X}");
+            let digit = f(&blwe);
             count.blind_array_inc(&digit, ctx, self);
             count.lo.print(private_key, ctx);
             count.hi.print(private_key, ctx);
@@ -267,19 +312,49 @@ impl PublicKey {
         count.lo.print(private_key, ctx);
         count.hi.print(private_key, ctx);
 
-        // prefix sum
+        // prefix sum (~2s)
         let start = Instant::now();
-        for i in 1..16 {
+        for i in 0x01..=0x0f {
             let blwe = count.at(i - 1, ctx, self);
             // TODO: surely this part can be optimized
             let index = self.allocate_and_trivially_encrypt_lwe(i as u64, ctx);
             count.blind_array_add(&index, &blwe, ctx, self);
+            // bootstrap count nblut
+            if i % 4 == 0 {
+                let start = Instant::now();
+                count.lo = count.lo.bootstrap_lut(self, ctx);
+                count.hi = count.hi.bootstrap_lut(self, ctx);
+                println!("bootstrap elapsed {:?}", Instant::now() - start);
+            }
         }
         println!("prefix sum elapsed: {:?}", Instant::now() - start);
         count.lo.print(private_key, ctx);
         count.hi.print(private_key, ctx);
 
-        bblut.clone()
+        // rebuild sorted LUT
+        let mut result = ByteByteLUT::from_bytes_trivially(&[0; 256], ctx);
+        let start = Instant::now();
+        for i in (0x00..=0xff).rev() {
+            let blwe = bblut.at(i, self, ctx);
+            let digit = f(&blwe);
+            let byte = blwe.to_byte(ctx, private_key);
+            let d = private_key.decrypt_lwe(&digit, ctx);
+            println!("{byte:02X}: {d:X}");
+            // TODO: could be hacked to output value post-dec in less than two extra br?
+            count.blind_array_dec(&digit, ctx, self);
+            count.print(private_key, ctx);
+            let index = count.blind_array_access(&digit, ctx, self);
+            result.blind_array_init(&index, &blwe, ctx, self);
+            result.print(self, private_key, ctx);
+        }
+        println!("rebuild elapsed: {:?}", Instant::now() - start);
+
+        result
+    }
+
+    pub fn blind_radix_sort(&self, bblut: &ByteByteLUT, ctx: &Context) -> ByteByteLUT {
+        let partial = self.keyed_blind_counting_sort(bblut, |blwe| blwe.lo.clone(), ctx);
+        self.keyed_blind_counting_sort(&partial, |blwe| blwe.hi.clone(), ctx)
     }
 }
 
@@ -379,6 +454,29 @@ mod test {
     // }
 
     #[test]
+    fn test_nybl_byte_lut_blind_array_dec() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        // let items: [u8; 256] = std::array::from_fn(|i| i as u8);
+        // let bblut = ByteByteLUT::from_bytes(&items, private_key, &mut ctx);
+
+        let items: [u8; 16] = std::array::from_fn(|i| (((i + 1) % 16) << 4) as u8);
+        let mut count = NyblByteLUT::from_bytes_trivially(&items, &ctx);
+        count.print(private_key, &ctx);
+        println!("==============");
+        for i in (0..=0xff).rev() {
+            // let blwe = bblut.at(i, public_key, &ctx);
+            println!("{:02X}", i >> 4);
+            let index = private_key.allocate_and_encrypt_lwe(i >> 4, &mut ctx);
+            count.blind_array_dec(&index, &ctx, public_key);
+            count.print(private_key, &ctx);
+            println!("=====");
+        }
+    }
+
+    #[test]
     fn test_keyed_blind_counting_sort() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
@@ -394,7 +492,40 @@ mod test {
         }
 
         let start = Instant::now();
-        public_key.keyed_blind_counting_sort(&bblut, |blwe| blwe.lo, &ctx);
+        public_key.keyed_blind_counting_sort(&bblut, |blwe| blwe.hi.clone(), &ctx);
+        println!("total time elapsed: {:?}", Instant::now() - start);
+    }
+
+    #[test]
+    fn test_byte_byte_lut_blind_array_init() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let items = std::array::from_fn(|i| i as u8);
+        let bblut = ByteByteLUT::from_bytes(&items, private_key, &mut ctx);
+
+        let mut result = ByteByteLUT::from_bytes_trivially(&[0; 256], &ctx);
+
+        let index = ByteLWE::from_byte(0xff, &mut ctx, private_key);
+        // let value = ByteLWE::from_byte(0xff, &mut ctx, private_key);
+        let value = bblut.at(0xff, public_key, &ctx);
+        result.blind_array_init(&index, &value, &ctx, public_key);
+
+        result.print(public_key, private_key, &ctx);
+    }
+
+    #[test]
+    fn test_blind_radix_sort() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let items: [u8; 256] = std::array::from_fn(|i| i as u8);
+        let bblut = ByteByteLUT::from_bytes(&items, private_key, &mut ctx);
+
+        let start = Instant::now();
+        public_key.keyed_blind_counting_sort(&bblut, |blwe| blwe.hi.clone(), &ctx);
         println!("total time elapsed: {:?}", Instant::now() - start);
     }
 }

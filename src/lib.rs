@@ -1151,7 +1151,9 @@ impl PublicKey {
         ctx: &Context,
     ) {
         let mut column_lut = LUT::from_lwe(&value, &self, ctx);
-        self.blind_rotation_assign(&self.neg_lwe(line, ctx), &mut column_lut, ctx);
+        let mut n = self.allocate_and_trivially_encrypt_lwe(ctx.full_message_modulus as u64, ctx);
+        lwe_ciphertext_sub_assign(&mut n, line);
+        self.blind_rotation_assign(&n, &mut column_lut, ctx);
         for (i, lut) in matrix.iter_mut().enumerate() {
             let x = self.lut_extract(&column_lut, i, ctx);
             self.blind_array_increment(lut, &column, &x, ctx);
@@ -1955,7 +1957,10 @@ impl LUT {
 
     /// re-packs a fresh LUT from its sample extracts
     pub fn bootstrap_lut(&self, public_key: &PublicKey, ctx: &Context) -> LUT {
-        let many_lwe = self.to_many_lwe(public_key, ctx);
+        let mut many_lwe = self.to_many_lwe(public_key, ctx);
+        for mut lwe in many_lwe.iter_mut() {
+            public_key.bootstrap_lwe(&mut lwe, ctx);
+        }
         LUT::from_vec_of_lwe(&many_lwe, public_key, ctx)
     }
 }
@@ -2087,7 +2092,6 @@ mod test {
     use itertools::Itertools;
     use quickcheck::TestResult;
     use rand::seq::SliceRandom;
-    use tfhe::boolean::server_key;
     use tfhe::integer::ciphertext::BaseCrtCiphertext;
     use tfhe::integer::ciphertext::BaseRadixCiphertext;
     use tfhe::integer::ClientKey as IntegerClientKey;
@@ -3335,5 +3339,18 @@ mod test {
         let actual = private_key.decrypt_lwe(&ciphertext, &ctx);
 
         assert_eq!(actual, 1);
+
+        let mut matrix =
+            Vec::from_iter((0..16).map(|_| LUT::from_vec(&vec![0; 16], &private_key, &mut ctx)));
+        let line = private_key.allocate_and_encrypt_lwe(15, &mut ctx);
+        let column = private_key.allocate_and_encrypt_lwe(15, &mut ctx);
+        let value = private_key.allocate_and_encrypt_lwe(15, &mut ctx);
+
+        public_key.blind_matrix_add(&mut matrix, &line, &column, &value, &ctx);
+
+        let ciphertext = public_key.blind_matrix_access(&matrix, &line, &column, &ctx);
+        let actual = private_key.decrypt_lwe(&ciphertext, &ctx);
+
+        assert_eq!(actual, 15);
     }
 }
