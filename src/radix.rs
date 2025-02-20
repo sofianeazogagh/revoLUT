@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 /// Assuming we work in param4
-use tfhe::core_crypto::algorithms::{lwe_ciphertext_add, lwe_ciphertext_add_assign};
+use tfhe::core_crypto::algorithms::lwe_ciphertext_add_assign;
 
 use crate::{key, Context, PrivateKey, PublicKey, LUT, LWE};
 
@@ -226,14 +226,12 @@ impl ByteByteLUT {
         ctx: &Context,
         public_key: &PublicKey,
     ) {
-        // 2 bma
-        let current = self.blind_array_access(index, ctx, public_key);
-
-        // 1 bma for carry
-        let new_value = public_key.byte_lwe_add(&current, &value, ctx);
-
-        // 4 bma
-        self.blind_array_set(index, &new_value, ctx, public_key);
+        // 3 BMA + 1 BMA_mv
+        let old_lo = public_key.blind_matrix_access(&self.lo, &index.hi, &index.lo, ctx);
+        let mut carry = public_key.nybl_carry(&old_lo, &value.lo, ctx);
+        lwe_ciphertext_add_assign(&mut carry, &value.hi);
+        public_key.blind_matrix_add(&mut self.lo, &index.hi, &index.lo, &value.lo, ctx);
+        public_key.blind_matrix_add(&mut self.hi, &index.hi, &index.lo, &carry, ctx);
     }
 
     /// replace encrypted value at encrypted index by new encrypted value
@@ -266,10 +264,8 @@ impl ByteByteLUT {
 }
 
 impl PublicKey {
-    pub fn byte_lwe_add(&self, a: &ByteLWE, b: &ByteLWE, ctx: &Context) -> ByteLWE {
-        let mut lo = self.allocate_and_trivially_encrypt_lwe(0, ctx);
-        lwe_ciphertext_add_assign(&mut lo, &a.lo);
-        lwe_ciphertext_add_assign(&mut lo, &b.lo);
+    /// Compute encrypted carry as the result of adding two encrypted nybles
+    pub fn nybl_carry(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
         // let carry_matrix = Vec::from_iter((0..16).map(|lin| {
         //     LUT::from_vec_trivially(
         //         &Vec::from_iter((0..16).map(|col| if lin + col >= 16 { 1 } else { 0 })),
@@ -280,10 +276,17 @@ impl PublicKey {
             (0..16)
                 .map(|lin| Vec::from_iter((0..16).map(|col| if lin + col >= 16 { 1 } else { 0 }))),
         );
-        // let mut hi = self.blind_matrix_access(&carry_matrix, &a.lo, &b.lo, ctx);
-        let twice_bit = self.blind_matrix_access_mv(&carry_matrix, &a.lo, &b.lo, ctx);
+        let twice_bit = self.blind_matrix_access_mv(&carry_matrix, &a, &b, ctx);
         let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
-        let mut hi = self.blind_array_access(&twice_bit, &lut, &ctx);
+        // let mut hi = self.blind_matrix_access(&carry_matrix, &a.lo, &b.lo, ctx);
+        self.blind_array_access(&twice_bit, &lut, &ctx)
+    }
+
+    pub fn byte_lwe_add(&self, a: &ByteLWE, b: &ByteLWE, ctx: &Context) -> ByteLWE {
+        let mut lo = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        lwe_ciphertext_add_assign(&mut lo, &a.lo);
+        lwe_ciphertext_add_assign(&mut lo, &b.lo);
+        let mut hi = self.nybl_carry(&a.lo, &b.lo, ctx);
         lwe_ciphertext_add_assign(&mut hi, &a.hi);
         lwe_ciphertext_add_assign(&mut hi, &b.hi);
         ByteLWE { lo, hi }
@@ -414,24 +417,17 @@ mod test {
         let public_key = &private_key.public_key;
 
         let mut bblut = ByteByteLUT::from_bytes(&[0; 256], private_key, &mut ctx);
-        let index = ByteLWE::from_byte(33, &mut ctx, private_key);
-        let value = ByteLWE::from_byte(17, &mut ctx, private_key);
+        let index = ByteLWE::from_byte(0, &mut ctx, private_key);
+        let value = ByteLWE::from_byte(1, &mut ctx, private_key);
 
         let start = Instant::now();
         bblut.blind_array_add(&index, &value, &ctx, public_key);
         println!("elapsed: {:?}", Instant::now() - start);
 
-        // for i in u8::MIN..=u8::MAX {
-        //     let idx = ByteLWE::from_byte(i, &mut ctx, private_key);
-        //     let ct = bblut.blind_array_access(&idx, &ctx, public_key);
-        //     let actual = ct.to_byte(&ctx, private_key);
-        //     println!("{i}: {actual}");
-        // }
-
         let ct = bblut.blind_array_access(&index, &ctx, public_key);
         let actual = ct.to_byte(&ctx, private_key);
 
-        assert_eq!(actual, 17);
+        assert_eq!(actual, 1);
     }
 
     // #[test]
