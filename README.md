@@ -1,7 +1,8 @@
 # revoLUT
 
+This repository contains `revoLUT`, a Rust library that reimagines TFHE's Look-Up Tables (LUTs) in the context of homomorphic encryption. The LUTs are using as a first-class object to implement some data-oblivious algorithms.
 
-## Using TFHE-rs with nightly toolchain in oblivious-tm-rs
+## Using TFHE-rs with nightly toolchain
 
 First, install the needed Rust toolchain:
 ```bash

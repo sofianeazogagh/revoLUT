@@ -10,7 +10,7 @@ use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::{fs, io};
-use tfhe::integer::ciphertext::BaseRadixCiphertext;
+// use tfhe::integer::ciphertext::BaseRadixCiphertext;
 // use std::process::Output;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -250,7 +250,7 @@ impl PrivateKey {
     pub fn new(ctx: &mut Context) -> PrivateKey {
         let n = ctx.full_message_modulus();
         println!(
-            "generating new secret (and public) key for messages in param {} ({} bits)",
+            "----- Generating keys for message in param {} ({} bits) -----",
             n.ilog2(),
             n
         );
@@ -384,6 +384,8 @@ impl PrivateKey {
         );
         println!("{:?}", Instant::now() - start);
 
+        println!("----- Keys generated -----");
+
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
@@ -393,7 +395,6 @@ impl PrivateKey {
 
         PrivateKey {
             small_lwe_sk: lwe_sk,
-            // big_lwe_sk,
             glwe_sk,
             public_key,
         }

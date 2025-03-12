@@ -38,6 +38,7 @@ pub struct NyblByteLUT {
 }
 
 impl NyblByteLUT {
+    #[allow(dead_code)]
     pub fn from_bytes(input: &[u8; 16], private_key: &PrivateKey, ctx: &mut Context) -> Self {
         let los = Vec::from_iter((0..16).map(|i| ((input[i] >> 0) & 0b1111) as u64));
         let his = Vec::from_iter((0..16).map(|i| ((input[i] >> 4) & 0b1111) as u64));
