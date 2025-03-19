@@ -44,7 +44,7 @@ impl crate::PublicKey {
             }
         }
 
-        self.blind_permutation(lut, permutation, ctx)
+        self.blind_permutation(&lut, &permutation, ctx)
     }
 
     /// given a sparse but ordered lut, returns a permutation that compacts non-null values to the left
@@ -78,11 +78,11 @@ impl crate::PublicKey {
 
         // read the lut as a permutation, and apply it to itself
         let permutation = Vec::from_iter((0..n).map(|i| self.lut_extract(&lut, i, &ctx)));
-        let permuted_lut = self.blind_permutation(lut, permutation, ctx);
+        let permuted_lut = self.blind_permutation(&lut, &permutation, ctx);
 
         // compacts non-null values to the left
         let second_permutation = self.compute_compact_permutation(&permuted_lut, ctx);
-        self.blind_permutation(permuted_lut, second_permutation, ctx)
+        self.blind_permutation(&permuted_lut, &second_permutation, ctx)
     }
 
     pub fn blind_counting_sort(&self, lut: &LUT, ctx: &Context) -> LUT {

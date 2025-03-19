@@ -60,3 +60,11 @@ harness = false
 [[bench]]
 name = "packing"
 harness = false
+
+
+[features]
+row-padding = []
+
+[[example]]
+name = "blind_matrix_access"
+features = ["row-padding"]

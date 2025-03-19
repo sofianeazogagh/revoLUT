@@ -250,7 +250,7 @@ impl PrivateKey {
     pub fn new(ctx: &mut Context) -> PrivateKey {
         let n = ctx.full_message_modulus();
         println!(
-            "----- Generating keys for message in param {} ({} bits) -----",
+            "----- Generating keys for message in param {} ({} bits) ----- \n",
             n.ilog2(),
             n
         );
@@ -1299,7 +1299,7 @@ impl PublicKey {
     }
 
     /// Swap the elements of a `lut` given a vector of `permutation` and return the lut permuted
-    pub fn blind_permutation(&self, lut: LUT, permutation: Vec<LWE>, ctx: &Context) -> LUT {
+    pub fn blind_permutation(&self, lut: &LUT, permutation: &Vec<LWE>, ctx: &Context) -> LUT {
         let mut many_lut = lut.to_many_lut(&self, &ctx);
         // Multi Blind Rotate
         many_lut
@@ -1322,7 +1322,7 @@ impl PublicKey {
         let n = ctx.full_message_modulus() as u64;
         let id = LUT::from_vec_trivially(&Vec::from_iter(0..n), ctx); // should be cached
         let permutation = lut.to_many_lwe(&self, ctx);
-        let indices = self.blind_permutation(id, permutation, ctx);
+        let indices = self.blind_permutation(&id, &permutation, ctx);
         self.lut_extract(&indices, k, ctx)
     }
 
@@ -1330,7 +1330,7 @@ impl PublicKey {
         let n = ctx.full_message_modulus() as u64;
         let id = LUT::from_vec_trivially(&Vec::from_iter(0..n), ctx); // should be cached
         let permutation = lut.to_many_lwe(&self, ctx);
-        let indices = self.blind_permutation(id, permutation, ctx);
+        let indices = self.blind_permutation(&id, &permutation, ctx);
         self.blind_array_access(&k, &indices, ctx)
     }
 
@@ -2533,7 +2533,7 @@ mod test {
         );
 
         let begin = Instant::now();
-        let permuted = public_key.blind_permutation(lut, permutation, &ctx);
+        let permuted = public_key.blind_permutation(&lut, &permutation, &ctx);
         let elapsed = Instant::now() - begin;
 
         print!("sorted ({:?}): ", elapsed);
@@ -2616,7 +2616,7 @@ mod test {
 
             // Make the permutation
             let begin = Instant::now();
-            let permuted = public_key.blind_permutation(lut, permutation, &ctx);
+            let permuted = public_key.blind_permutation(&lut, &permutation, &ctx);
             let elapsed = Instant::now() - begin;
             print!("sorted ({:?}): ", elapsed);
             permuted.print(&private_key, &ctx);
