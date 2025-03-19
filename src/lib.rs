@@ -1151,7 +1151,7 @@ impl PublicKey {
         value: &LWE,
         ctx: &Context,
     ) {
-        let mut column_lut = LUT::from_lwe(&value, &self, ctx);
+        let mut column_lut = LUT::from_lwe(&self.neg_lwe(value, ctx), &self, ctx);
         let mut n = self.allocate_and_trivially_encrypt_lwe(ctx.full_message_modulus as u64, ctx);
         lwe_ciphertext_sub_assign(&mut n, line);
         self.blind_rotation_assign(&n, &mut column_lut, ctx);
