@@ -2,28 +2,19 @@
 
 This repository contains `revoLUT`, a Rust library that reimagines TFHE's Look-Up Tables (LUTs) in the context of homomorphic encryption. The LUTs are using as a first-class object to implement some data-oblivious algorithms.
 
-## Using TFHE-rs with nightly toolchain
+Warning: The library is currently under development and refactoring. However, here what we can do to start playing with the library.
 
-First, install the needed Rust toolchain:
+## Running the examples
+There are few examples in the folder `examples` that can be run by using the following command:
 ```bash
-rustup toolchain install nightly
+cargo run --example EXAMPLE_NAME
 ```
+where `EXAMPLE_NAME` is the name of the example file without the `.rs` extension.
 
-Then, you can either:
-Manually specify the toolchain to use in each of the cargo commands:
-For example:
-```bash
-cargo +nightly build
-cargo +nightly run
-```
-Or override the toolchain to use for the current project:
-```bash
-rustup override set nightly
-# cargo will use the `nightly` toolchain.
-cargo build
-```
 
 ## Generate PrivateKey files
+
+For the moment, the main function generate the private key files for the different parameters and save them in files named `PrivateKey<param_name>.toml`. 
 
 ```bash
 cargo run --release
@@ -31,11 +22,14 @@ cargo run --release
 
 ## Running tests
 
+Several tests are present in the `lib.rs` file. To run them, use the following command:
 ```bash
 cargo test --release TEST_NAME -- --nocapture
 ```
 
 ## Running benchmarks
+
+Some benchmarks are present in the `benches` folder, especially for the different sorting algorithms. To run them, use the following command:
 
 ```bash
 cargo bench --bench BENCH_NAME
