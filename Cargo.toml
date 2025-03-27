@@ -34,6 +34,7 @@ serde = { version = "1.0", features = ["derive"] }
 rand = "0.8"
 csv = "1.1.6"
 serde_json = "1.0"
+ndarray = { version = "0.16.1", features = ["rayon"] }
 
 [dev-dependencies]
 quickcheck = "1"

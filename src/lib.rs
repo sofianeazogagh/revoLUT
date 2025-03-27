@@ -10,7 +10,6 @@ use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::{fs, io};
-use tfhe::integer::ciphertext::BaseRadixCiphertext;
 // use std::process::Output;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -30,6 +29,7 @@ use rand::Rng;
 
 mod blind_sort;
 mod blind_topk;
+pub mod lut;
 mod radix;
 
 pub type LWE = LweCiphertext<Vec<u64>>;
@@ -116,7 +116,7 @@ pub struct Context {
     big_lwe_dimension: LweDimension,
     delta: u64,
     full_message_modulus: usize,
-    signed_decomposer: SignedDecomposer<u64>,
+    pub signed_decomposer: SignedDecomposer<u64>,
     encryption_generator: EncryptionRandomGenerator<ActivatedRandomGenerator>,
     secret_generator: SecretRandomGenerator<ActivatedRandomGenerator>,
     box_size: usize,
@@ -338,36 +338,36 @@ impl PrivateKey {
         // Create Packing Key Switch
 
         // Private Functional Packing Key Switch Key
-        print!("generating lwe private functional packing keyswitch key: ");
-        let _ = io::stdout().flush();
-        let start = Instant::now();
-        let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
-            0,
-            ctx.pfks_base_log(),
-            ctx.pfks_level(),
-            ctx.big_lwe_dimension(),
-            ctx.glwe_dimension().to_glwe_size(),
-            ctx.polynomial_size(),
-            ctx.ciphertext_modulus(),
-        );
+        // print!("generating lwe private functional packing keyswitch key: ");
+        // let _ = io::stdout().flush();
+        // let start = Instant::now();
+        // let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
+        //     0,
+        //     ctx.pfks_base_log(),
+        //     ctx.pfks_level(),
+        //     ctx.big_lwe_dimension(),
+        //     ctx.glwe_dimension().to_glwe_size(),
+        //     ctx.polynomial_size(),
+        //     ctx.ciphertext_modulus(),
+        // );
 
-        // Here there is some freedom for the choice of the last polynomial from algorithm 2
-        // By convention from the paper the polynomial we use here is the constant -1
-        let mut last_polynomial = Polynomial::new(0, ctx.polynomial_size());
-        // Set the constant term to u64::MAX == -1i64
-        // last_polynomial[0] = u64::MAX;
-        last_polynomial[0] = 1_u64;
-        // Generate the LWE private functional packing keyswitch key
-        par_generate_lwe_private_functional_packing_keyswitch_key(
-            &glwe_sk.as_lwe_secret_key(),
-            &glwe_sk,
-            &mut pfpksk,
-            ctx.parameters.glwe_noise_distribution,
-            &mut ctx.encryption_generator,
-            |x| x,
-            &last_polynomial,
-        );
-        println!("{:?}", Instant::now() - start);
+        // // Here there is some freedom for the choice of the last polynomial from algorithm 2
+        // // By convention from the paper the polynomial we use here is the constant -1
+        // let mut last_polynomial = Polynomial::new(0, ctx.polynomial_size());
+        // // Set the constant term to u64::MAX == -1i64
+        // // last_polynomial[0] = u64::MAX;
+        // last_polynomial[0] = 1_u64;
+        // // Generate the LWE private functional packing keyswitch key
+        // par_generate_lwe_private_functional_packing_keyswitch_key(
+        //     &glwe_sk.as_lwe_secret_key(),
+        //     &glwe_sk,
+        //     &mut pfpksk,
+        //     ctx.parameters.glwe_noise_distribution,
+        //     &mut ctx.encryption_generator,
+        //     |x| x,
+        //     &last_polynomial,
+        // );
+        // println!("{:?}", Instant::now() - start);
 
         // Public Packing Key Switch
         print!("generating lwe packing keyswitch key: ");
@@ -387,7 +387,7 @@ impl PrivateKey {
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
-            pfpksk,
+            // pfpksk,
             packing_ksk,
         };
 
@@ -823,7 +823,7 @@ pub struct PublicKey {
     // utilKey ou ServerKey ou CloudKey
     pub lwe_ksk: LweKeyswitchKey<Vec<u64>>,
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
-    pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
+    // pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub packing_ksk: LwePackingKeyswitchKey<Vec<u64>>,
 }
 
@@ -1879,8 +1879,11 @@ impl LUT {
             ctx.ciphertext_modulus(),
         );
 
+        let start = Instant::now();
         keyswitch_lwe_ciphertext_into_glwe_ciphertext(&public_key.packing_ksk, &lwe, &mut output);
+        println!("\t ks {:?}", Instant::now() - start);
 
+        let start = Instant::now();
         // fill the first box in log(box_size) glwe sums
         for i in 0..ctx.box_size().ilog2() {
             let mut other = output.clone();
@@ -1891,6 +1894,7 @@ impl LUT {
         // center the box
         let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
         public_key.glwe_absorption_monic_monomial(&mut output, poly_monomial_degree);
+        println!("\t mul {:?}", Instant::now() - start);
 
         LUT(output)
     }
