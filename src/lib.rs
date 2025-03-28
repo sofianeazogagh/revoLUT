@@ -1879,11 +1879,8 @@ impl LUT {
             ctx.ciphertext_modulus(),
         );
 
-        let start = Instant::now();
         keyswitch_lwe_ciphertext_into_glwe_ciphertext(&public_key.packing_ksk, &lwe, &mut output);
-        println!("\t ks {:?}", Instant::now() - start);
 
-        let start = Instant::now();
         // fill the first box in log(box_size) glwe sums
         for i in 0..ctx.box_size().ilog2() {
             let mut other = output.clone();
@@ -1894,7 +1891,6 @@ impl LUT {
         // center the box
         let poly_monomial_degree = MonomialDegree(2 * ctx.polynomial_size().0 - ctx.box_size() / 2);
         public_key.glwe_absorption_monic_monomial(&mut output, poly_monomial_degree);
-        println!("\t mul {:?}", Instant::now() - start);
 
         LUT(output)
     }
