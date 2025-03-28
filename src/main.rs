@@ -54,8 +54,8 @@ pub fn bench_blind_read() {
         let index = NLWE::from_plain(0, m, &mut ctx, &private_key);
         let value = NLWE::from_plain(0, n, &mut ctx, &private_key);
         let start = Instant::now();
-        // let nlwe = lut.blind_read(&index, &ctx, &private_key.public_key);
-        lut.blind_init(&index, &value, &ctx, &private_key.public_key);
+        let nlwe = lut.blind_read(&index, &ctx, &private_key.public_key);
+        // lut.blind_init(&index, &value, &ctx, &private_key.public_key);
         let elapsed = Instant::now() - start;
         println!("{:?}", elapsed);
         // assert_eq!(nlwe.to_plain(&ctx, &private_key), 0);
