@@ -33,7 +33,7 @@ pub fn generate_keys() {
 }
 
 pub fn bench_blind_read() {
-    let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+    let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
     let private_key = key(ctx.parameters());
     let p = ctx.full_message_modulus() as u64;
     // 64k values
@@ -65,18 +65,18 @@ pub fn bench_blind_read() {
 
 pub fn main() {
     // generate_keys();
-    bench_blind_read();
-    // let param = PARAM_MESSAGE_6_CARRY_0;
-    // let mut ctx = Context::from(param);
-    // let private_key = key(param);
-    // let public_key = &private_key.public_key;
-    // for i in 0..=ctx.full_message_modulus().ilog2() {
-    //     println!("packing {} lwe into a lut", 2usize.pow(i));
-    //     let lwe = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
-    //     let start = Instant::now();
-    //     let lut = LUT::from_vec_of_lwe(&vec![lwe; 2usize.pow(i)], public_key, &ctx);
-    //     println!("==> elapsed {:?}", Instant::now() - start);
-    // }
+    // bench_blind_read();
+    let param = PARAM_MESSAGE_4_CARRY_0;
+    let mut ctx = Context::from(param);
+    let private_key = key(param);
+    let public_key = &private_key.public_key;
+    for i in 0..=ctx.full_message_modulus().ilog2() {
+        println!("packing {} lwe into a lut", 2usize.pow(i));
+        let lwe = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
+        let start = Instant::now();
+        let lut = LUT::from_vec_of_lwe(&vec![lwe; 2usize.pow(i)], public_key, &ctx);
+        println!("==> elapsed {:?}", Instant::now() - start);
+    }
 
     // for k in 2..10 {
     //     let now = std::time::Instant::now();
