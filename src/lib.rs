@@ -16,9 +16,7 @@ use std::time::Instant;
 use tfhe::shortint::{CarryModulus, Ciphertext, MessageModulus};
 use tfhe::{core_crypto::prelude::polynomial_algorithms::*, core_crypto::prelude::*};
 // use tfhe::core_crypto::prelude::polynomial_algorithms::polynomial_wrapping_monic_monomial_mul_assign;
-use tfhe::shortint::parameters::{
-    ClassicPBSParameters, Degree, NoiseLevel, PARAM_MESSAGE_1_CARRY_0,
-};
+use tfhe::shortint::parameters::{ClassicPBSParameters, Degree, NoiseLevel};
 use tfhe::shortint::prelude::CiphertextModulus;
 
 // Fast Fourier Transform
@@ -252,7 +250,7 @@ impl PrivateKey {
     pub fn new(ctx: &mut Context) -> PrivateKey {
         let n = ctx.full_message_modulus();
         println!(
-            "generating new secret (and public) key for messages in param {} ({} bits)",
+            "generating new secret (and public) key for messages in param {} (bits, mod {})",
             n.ilog2(),
             n
         );
@@ -1142,6 +1140,41 @@ impl PublicKey {
 
         // final blind array access
         self.blind_array_access(&line, &accumulator_final, ctx)
+    }
+
+    /// PIR-like construction to access a matrix element blindly, returns Enc(matrix[x][y])
+    /// time: 2BR + pKS
+    pub fn blind_matrix_access_clear(
+        &self,
+        matrix: &Vec<Vec<u64>>,
+        x: &LWE,
+        y: &LWE,
+        ctx: &Context,
+    ) -> LWE {
+        let p = ctx.full_message_modulus;
+        let mut lut = LUT::from_vec_trivially(&vec![1], ctx);
+        self.blind_rotation_assign(&self.neg_lwe(&x, &ctx), &mut lut, ctx);
+        let onehot = lut.to_many_lwe(&self, ctx);
+        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let l = matrix
+            .iter()
+            .enumerate()
+            .map(|(i, line)| {
+                let xi = onehot[i].clone();
+                Vec::from_iter(line.iter().map(|elt| {
+                    let mut output = xi.clone();
+                    lwe_ciphertext_cleartext_mul_assign(&mut output, Cleartext(*elt));
+                    output
+                }))
+            })
+            .fold(vec![zero; p], |mut acc, elt| {
+                acc.iter_mut()
+                    .zip(elt.iter())
+                    .for_each(|(dst, src)| lwe_ciphertext_add_assign(dst, src));
+                acc
+            });
+        let lut = LUT::from_vec_of_lwe(&l, &self, ctx);
+        self.blind_array_access(&y, &lut, ctx)
     }
 
     pub fn blind_matrix_add(
@@ -3354,5 +3387,36 @@ mod test {
         let actual = private_key.decrypt_lwe(&ciphertext, &ctx);
 
         assert_eq!(actual, 15);
+    }
+
+    #[test]
+    pub fn test_blind_matrix_access2() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let data = Vec::from_iter((0..16).map(|_| Vec::from_iter(0..16u64)));
+        // let matrix = Vec::from_iter(
+        //     (0..16)
+        //         .map(|i| LUT::from_vec(&data[i], &private_key, &mut ctx))
+        //         // .map(|i| LUT::from_vec_trivially(&data[i], &ctx))
+        //         .collect::<Vec<_>>(),
+        // );
+
+        for l in 0..16 {
+            let line = private_key.allocate_and_encrypt_lwe(l, &mut ctx);
+            for c in 0..16 {
+                let column = private_key.allocate_and_encrypt_lwe(c, &mut ctx);
+                let start = Instant::now();
+                // let ciphertext = public_key.blind_matrix_access(&matrix, &line, &column, &ctx);
+                let ciphertext = public_key.blind_matrix_access_clear(&data, &line, &column, &ctx);
+                println!("elapsed: {:?}", Instant::now() - start);
+                let actual = private_key.decrypt_lwe(&ciphertext, &ctx);
+
+                println!("({l}, {c}): {actual}");
+
+                assert_eq!(actual, data[l as usize][c as usize]);
+            }
+        }
     }
 }
