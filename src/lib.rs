@@ -29,6 +29,7 @@ use rand::Rng;
 
 mod blind_sort;
 mod blind_topk;
+mod counte;
 pub mod lut;
 mod radix;
 
@@ -2209,8 +2210,8 @@ mod test {
         );
 
         let integer_client_key = IntegerClientKey::from(shortint_client_key);
-        let crt_client_key = CrtClientKey::from((integer_client_key.clone(), vec![2, 3]));
-        let integer_server_key = IntegerServerKey::new_crt_server_key(&crt_client_key);
+        // let crt_client_key = CrtClientKey::from((integer_client_key.clone(), vec![2, 3]));
+        // let integer_server_key = IntegerServerKey::new_crt_server_key(&crt_client_key);
         // let lwe0 = public_key.allocate_and_trivially_encrypt_lwe(2, &ctx);
         // let ct0 = public_key.to_shortint_ciphertext(lwe0, &ctx);
 
