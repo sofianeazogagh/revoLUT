@@ -1650,6 +1650,17 @@ impl PublicKey {
         );
         ct
     }
+
+    pub fn blind_count(&self, lut: &LUT, ctx: &Context, private_key: &PrivateKey) -> LUT {
+        let mut count = LUT::from_vec_trivially(&vec![0; ctx.full_message_modulus()], ctx);
+        let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
+        for i in 0..ctx.full_message_modulus() {
+            let j = self.lut_extract(&lut, i, ctx);
+            self.blind_array_increment(&mut count, &j, &one, ctx);
+            count.print(private_key, ctx);
+        }
+        count
+    }
 }
 
 #[derive(Clone)]
@@ -3354,4 +3365,24 @@ mod test {
 
         assert_eq!(actual, 15);
     }
+
+    #[test]
+    fn test_op_blind_count() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let vec = vec![1, 2, 3, 1, 5];
+        let lut  = LUT::from_vec(&vec, &private_key, &mut ctx);
+
+        let count = public_key.blind_count(&lut,&ctx, private_key, );
+        let actual = count.to_array(private_key, &ctx);
+
+
+        println!("{:?}", actual);
+
+        
+    }
 }
+
+
