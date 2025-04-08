@@ -29,7 +29,6 @@ use rand::Rng;
 
 mod blind_sort;
 mod blind_topk;
-mod counte;
 pub mod lut;
 mod radix;
 

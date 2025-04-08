@@ -4,7 +4,7 @@ use std::{
 };
 
 // generalized LUT module
-use crate::{counte::Counter, key, Context, PrivateKey, PublicKey, LUT, LWE};
+use crate::{key, Context, PrivateKey, PublicKey, LUT, LWE};
 use ndarray::{Array, Dimension, IxDyn};
 use tfhe::core_crypto::prelude::lwe_ciphertext_add_assign;
 
@@ -480,7 +480,6 @@ impl MNLUT {
         let (m, n) = (self.m(), self.n());
         let private_key = key(ctx.parameters);
         let mut count = MNLUT::from_plain_trivially(&vec![0; p], 1, m, public_key, ctx);
-        // let mut count = Counter::new(m, ctx);
 
         println!("self {:02x?}", self.to_plain(ctx, private_key));
         // count the number of elements in each bucket
@@ -509,7 +508,6 @@ impl MNLUT {
         // rebuild the sorted LUT
         println!("rebuild LUT");
         let start = Instant::now();
-        // let mut count = Counter::from_nlwes(acc, ctx, public_key);
         let zeroes = &vec![0; p.pow(self.m() as u32)];
         let mut result = MNLUT::from_plain_trivially(zeroes, m, n, public_key, ctx);
         for i in (0..p.pow(m as u32)).rev() {
