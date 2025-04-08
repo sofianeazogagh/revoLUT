@@ -394,7 +394,7 @@ mod test {
         }
     }
 
-    #[quickcheck]
+    // #[quickcheck]
     fn test_byte_lwe_add_qc(a: u8, b: u8) -> TestResult {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);

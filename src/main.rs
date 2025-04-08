@@ -69,6 +69,7 @@ pub fn main() {
     let param = PARAM_MESSAGE_4_CARRY_0;
     let mut ctx = Context::from(param);
     let private_key = key(param);
+    let public_key = &private_key.public_key;
     for i in 0..=ctx.full_message_modulus().ilog2() {
         println!("packing {} lwe into a lut", 2usize.pow(i));
         let lwe = private_key.allocate_and_encrypt_lwe(0, &mut ctx);

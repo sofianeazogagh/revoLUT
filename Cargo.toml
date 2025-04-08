@@ -57,7 +57,3 @@ harness = false
 [[bench]]
 name = "bcs"
 harness = false
-
-[[bench]]
-name = "packing"
-harness = false

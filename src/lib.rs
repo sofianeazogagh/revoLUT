@@ -506,8 +506,9 @@ impl PrivateKey {
     pub fn decrypt_lwe(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
         // Decrypt the PBS multiplication result
         let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext);
-        let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
-        result % ctx.full_message_modulus() as u64
+        let result = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
+        // result % ctx.full_message_modulus() as u64
+        result
     }
 
     pub fn decrypt_lwe_without_reduction(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
@@ -3390,12 +3391,13 @@ mod test {
     }
 
     #[test]
-    pub fn test_blind_matrix_access2() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+    pub fn test_blind_matrix_access_clear() {
+        let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
+        let p = ctx.full_message_modulus();
 
-        let data = Vec::from_iter((0..16).map(|_| Vec::from_iter(0..16u64)));
+        let data = Vec::from_iter((0..32).map(|_| Vec::from_iter(0..32u64)));
         // let matrix = Vec::from_iter(
         //     (0..16)
         //         .map(|i| LUT::from_vec(&data[i], &private_key, &mut ctx))

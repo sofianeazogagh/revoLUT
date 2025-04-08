@@ -1,12 +1,9 @@
-use std::{
-    ops::{Add, Index},
-    time::Instant,
-};
+use std::{ops::Index, time::Instant};
 
 // generalized LUT module
 use crate::{key, Context, PrivateKey, PublicKey, LUT, LWE};
 use ndarray::{Array, Dimension, IxDyn};
-use tfhe::core_crypto::prelude::lwe_ciphertext_add_assign;
+use tfhe::core_crypto::prelude::{lwe_ciphertext_add_assign, lwe_ciphertext_sub_assign};
 
 /// Convert a value to a vector of n digits base p (most significant first)
 pub fn to_digits(value: u64, n: usize, p: u64) -> Vec<u64> {
@@ -23,21 +20,22 @@ pub fn from_digits(digits: &[u64], p: u64) -> u64 {
         .sum()
 }
 
-pub fn lwe_add_no_overflow(a: &LWE, b: &LWE, ctx: &Context, public_key: &PublicKey) -> LWE {
+pub fn lwe_add(a: &LWE, b: &LWE, ctx: &Context, public_key: &PublicKey) -> LWE {
     let p = ctx.full_message_modulus as u64;
-    let lut = LUT::from_function(|x| x, ctx);
-    let mut c = a.clone();
-    lwe_ciphertext_add_assign(&mut c, &b);
-    public_key.blind_array_access(&c, &lut, ctx)
+    let matrix = Vec::from_iter((0..p).map(|i| Vec::from_iter((0..p).map(|j| (i + j) % p as u64))));
+    public_key.blind_matrix_access_clear(&matrix, &a, &b, ctx)
 }
 
-pub fn lwe_add(a: &LWE, b: &LWE, ctx: &Context, public_key: &PublicKey) -> LWE {
-    // let mut c = a.clone();
-    // lwe_ciphertext_add_assign(&mut c, &b);
-    // c
-    let p = ctx.full_message_modulus as u64;
-    let tab = Vec::from_iter((0..p).map(|i| Vec::from_iter((0..p).map(|j| ((i + j) % p) as u64))));
-    public_key.blind_matrix_access_clear(&tab, &a, &b, ctx)
+pub fn lwe_add_overflow(a: &LWE, b: &LWE) -> LWE {
+    let mut c = a.clone();
+    lwe_ciphertext_add_assign(&mut c, &b);
+    c
+}
+
+pub fn lwe_sub_overflow(a: &LWE, b: &LWE) -> LWE {
+    let mut c = a.clone();
+    lwe_ciphertext_sub_assign(&mut c, &b);
+    c
 }
 
 /// A structure holding a N digit value
@@ -131,108 +129,105 @@ impl NLWE {
     }
 
     /// Adds other NLWE to self, digit-wise (with carry)
-    /// TODO: impl for N > 2
     pub fn add(&self, other: &NLWE, ctx: &Context, public_key: &PublicKey) -> NLWE {
         let p = ctx.full_message_modulus as u64;
         let n = self.n();
-        let carry =
-            Vec::from_iter((0..p).map(|i| Vec::from_iter((0..p).map(|j| ((i + j) >= p) as u64))));
+        let carry = ((0..p).map(|i| ((0..p).map(|j| ((i + j) >= p) as u64)).collect())).collect();
+        let inc = LUT::from_function(|x| (x + 1) % p, ctx);
         let mut output = NLWE::from_plain_trivially(0, n, ctx, public_key);
-        output.digits[n - 1] = lwe_add(&self.digits[n - 1], &other.digits[n - 1], ctx, public_key);
-        if n > 1 {
-            let b = public_key.blind_matrix_access_clear(
-                &carry,
-                &self.digits[n - 1],
-                &other.digits[n - 1],
-                ctx,
-            );
-            output.digits[n - 2] =
-                lwe_add(&self.digits[n - 2], &other.digits[n - 2], ctx, public_key);
-            output.digits[n - 2] = lwe_add(&output.digits[n - 2], &b, ctx, public_key);
-            let private_key = key(ctx.parameters);
-            println!("{:?}", output.to_plain(ctx, private_key));
+
+        // from right to left
+        output.digits[n - 1] = lwe_add(&self[n - 1], &other[n - 1], ctx, public_key);
+        for i in (0..n - 1).rev() {
+            let sum = lwe_add(&self[i], &other[i], ctx, public_key);
+            let b = public_key.blind_matrix_access_clear(&carry, &self[i + 1], &other[i + 1], ctx);
+            let next = public_key.blind_array_access(&sum, &inc, ctx);
+            let sel = LUT::from_vec_of_lwe(&vec![sum, next], public_key, ctx);
+            output.digits[i] = public_key.blind_array_access(&b, &sel, ctx);
         }
+
         output
     }
 
     /// Adds other NLWE to self, digit-wise (without carry)
-    pub fn add_no_carry(&self, other: &NLWE, ctx: &Context, public_key: &PublicKey) -> NLWE {
-        // let lut = LUT::from_function(|x| x, ctx);
-        // let p = ctx.full_message_modulus as u64;
-        // let tab = Vec::from_iter((0..p).map(|i| Vec::from_iter((0..p).map(|j| (i + j) % p))));
+    pub fn add_digitwise_overflow(&self, other: &NLWE) -> NLWE {
         NLWE {
             digits: self
                 .digits
                 .iter()
                 .zip(other.digits.iter())
-                // .map(|(a, b)| public_key.blind_matrix_access_clear(&tab, a, b, ctx))
-                .map(|(a, b)| lwe_add(&a, &b, ctx, public_key))
+                .map(|(a, b)| lwe_add_overflow(&a, &b))
                 .collect(),
         }
     }
 
-    /// Special addition case where one of the operands is zero
-    fn addz(&self, b: &NLWE, ctx: &Context, public_key: &PublicKey) -> NLWE {
-        let lut = LUT::from_function(|x| x, ctx);
+    pub fn sub_digitwise_overflow(&self, other: &NLWE) -> NLWE {
         NLWE {
             digits: self
                 .digits
                 .iter()
-                .zip(b.digits.iter())
-                .map(|(a, b)| {
-                    let mut c = a.clone();
-                    lwe_ciphertext_add_assign(&mut c, b);
-                    public_key.blind_array_access(&c, &lut, ctx)
-                })
+                .zip(other.digits.iter())
+                .map(|(a, b)| lwe_sub_overflow(&a, &b))
                 .collect(),
         }
     }
 
     // Increment the NLWE
+    // TODO: optimize
     pub fn increment(&self, ctx: &Context, public_key: &PublicKey) -> NLWE {
-        let mask = self.carry_mask(true, ctx, public_key);
-        self.add_no_carry(&mask, ctx, public_key)
-    }
-
-    /// Construct a digit-wise additive mask to increment or decrement the NLWE
-    pub fn carry_mask(&self, increment: bool, ctx: &Context, public_key: &PublicKey) -> NLWE {
-        let mut one = NLWE::from_plain_trivially(1, self.n(), &ctx, public_key);
-        let sentinel = (ctx.full_message_modulus as u64 - 1) * increment as u64;
-        let carry = LUT::from_function(|x| (x == sentinel) as u64, ctx);
+        let p = ctx.full_message_modulus as u64;
+        let mut out = self.clone();
+        let is_mone = LUT::from_function(|x| (x == p - 1) as u64, ctx);
+        let inc = LUT::from_function(|x| (x + 1) % p, ctx);
 
         let mut acc = public_key.allocate_and_trivially_encrypt_lwe(1, ctx);
-        for i in (1..self.n()).rev() {
-            let b = public_key.blind_array_access(&self.digits[i], &carry, ctx);
+        // from right to left
+        for digit in out.digits.iter_mut().rev() {
+            // digit stays self or becomes next
+            let next = public_key.blind_array_access(&digit, &inc, ctx);
+            let sel = LUT::from_vec_of_lwe(&vec![digit.clone(), next], public_key, ctx);
+            let next_digit = public_key.blind_array_access(&acc, &sel, ctx);
+
+            // is current digit full?
+            let b = public_key.blind_array_access(digit, &is_mone, ctx);
+            // are all digits so far full?
             let zero = public_key.allocate_and_trivially_encrypt_lwe(0, ctx);
             let andb = LUT::from_vec_of_lwe(&vec![zero, b], public_key, ctx);
+
             acc = public_key.blind_array_access(&acc, &andb, ctx);
-            one.digits[i - 1] = lwe_add(&one.digits[i - 1], &acc, ctx, public_key);
+            *digit = next_digit;
         }
 
-        if !increment {
-            one = one.negate(ctx, public_key);
-        }
-
-        one
+        out
     }
 
     /// Decrement the NLWE
+    /// TODO: refactor with increment
     pub fn decrement(&self, ctx: &Context, public_key: &PublicKey) -> NLWE {
-        let mask = self.carry_mask(false, ctx, public_key);
-        self.add_no_carry(&mask, ctx, public_key)
-    }
-
-    /// Negate the NLWE
-    pub fn negate(&self, ctx: &Context, public_key: &PublicKey) -> NLWE {
         let p = ctx.full_message_modulus as u64;
-        let lut = LUT::from_function(|x| (0 - x) % p, ctx);
-        NLWE {
-            digits: self
-                .digits
-                .iter()
-                .map(|a| public_key.blind_array_access(&a, &lut, ctx))
-                .collect(),
+        let mut out = self.clone();
+        let is_zero = LUT::from_function(|x| (x == 0) as u64, ctx);
+        let dec = LUT::from_function(|x| (x - 1) % p, ctx);
+
+        let mut acc = public_key.allocate_and_trivially_encrypt_lwe(1, ctx);
+        // from right to left
+        for digit in out.digits.iter_mut().rev() {
+            // digit stays self or becomes next
+            let next = public_key.blind_array_access(&digit, &dec, ctx);
+            let sel = LUT::from_vec_of_lwe(&vec![digit.clone(), next], public_key, ctx);
+            let next_digit = public_key.blind_array_access(&acc, &sel, ctx);
+
+            // is current digit full?
+            let b = public_key.blind_array_access(digit, &is_zero, ctx);
+            // are all digits so far full?
+            let zero = public_key.allocate_and_trivially_encrypt_lwe(0, ctx);
+            let andb = LUT::from_vec_of_lwe(&vec![zero, b], public_key, ctx);
+
+            acc = public_key.blind_array_access(&acc, &andb, ctx);
+            *digit = next_digit;
         }
+
+        out
     }
 }
 
@@ -329,6 +324,11 @@ impl MNLUT {
             };
         }
 
+        // construct the index into the lower dimensional MNLUT by ignoring the first digit
+        let rest = &NLWE {
+            digits: index.digits[1..].to_vec(),
+        };
+
         // Otherwise M at least 2, pack p NLWEs from subspaces into a single MNLUT with m = 1
         let line = MNLUT {
             nlwes: Array::from_shape_fn(IxDyn(&vec![p as usize; 1]), |i| {
@@ -346,56 +346,35 @@ impl MNLUT {
                     ),
                 };
 
-                // construct the index into the lower dimensional MNLUT by ignoring the first digit
-                let rest = &NLWE {
-                    digits: index.digits[1..].to_vec(),
-                };
                 subspace.blind_tensor_access(rest, ctx, public_key)
             }),
         };
 
-        line.blind_tensor_access(&index, ctx, public_key)
+        line.blind_tensor_access(rest, ctx, public_key)
     }
 
-    /// Write a n-digit value to the LUT at index given by a m-digit value
-    /// (Overwriting previous value)
-    pub fn blind_tensor_assign(
+    /// Write a n-digit value to the LUT at index given by a m-digit value (Overwriting previous value)
+    /// Returns the previous and new values
+    pub fn blind_tensor_update<F: Fn(&NLWE) -> NLWE>(
         &mut self,
         index: &NLWE,
-        value: &NLWE,
+        f: F,
         ctx: &Context,
         public_key: &PublicKey,
-    ) {
+    ) -> (NLWE, NLWE) {
         assert_eq!(index.n(), self.m());
-        assert_eq!(value.n(), self.n());
         // prefetch and negate current value to offset the addition
-        let current = self.blind_tensor_access(&index, ctx, public_key);
-        let ncurrent = current.negate(ctx, public_key);
-        let value = ncurrent.add_no_carry(value, ctx, public_key);
+        let prev = self.blind_tensor_access(&index, ctx, public_key);
+        let next = f(&prev);
+        assert_eq!(next.n(), self.n());
+        let value = next.sub_digitwise_overflow(&prev);
 
-        self.blind_tensor_add_no_carry(index, &value, ctx, public_key);
-    }
-
-    /// Write a n-digit value to the LUT at index given by a m-digit value
-    /// (Assuming the value at given index is zero)
-    pub fn blind_tensor_init(
-        &mut self,
-        index: &NLWE,
-        value: &NLWE,
-        ctx: &Context,
-        public_key: &PublicKey,
-    ) {
-        assert_eq!(index.n(), self.m());
-        assert_eq!(value.n(), self.n());
-        // special case where all additions have at least one operand zero
-        let mask = Self::blind_tensor_lift(index, value, ctx, public_key);
-        self.nlwes.zip_mut_with(&mask.nlwes, |a, b| {
-            *a = a.addz(&b, ctx, public_key);
-        });
+        self.blind_tensor_add_digitwise_overflow(index, &value, ctx, public_key);
+        (prev, next)
     }
 
     /// Adds a n-digit value to the LUT at index given by a m-digit value (digit-wise, without carry)
-    pub fn blind_tensor_add_no_carry(
+    pub fn blind_tensor_add_digitwise_overflow(
         &mut self,
         index: &NLWE,
         value: &NLWE,
@@ -407,7 +386,7 @@ impl MNLUT {
         let mask = Self::blind_tensor_lift(index, value, ctx, public_key);
         // add computed luts to the current luts
         self.nlwes.zip_mut_with(&mask.nlwes, |a, b| {
-            *a = a.add_no_carry(&b, ctx, public_key);
+            *a = a.add_digitwise_overflow(&b);
         });
     }
 
@@ -452,11 +431,12 @@ impl MNLUT {
     pub fn blind_tensor_increment(&mut self, index: &NLWE, ctx: &Context, public_key: &PublicKey) {
         assert_eq!(index.n(), self.m());
 
-        let nlwe = self
-            .blind_tensor_access(index, ctx, public_key)
-            .carry_mask(true, ctx, public_key);
-
-        self.blind_tensor_add_no_carry(index, &nlwe, ctx, public_key);
+        self.blind_tensor_update(
+            index,
+            |nlwe| nlwe.increment(ctx, public_key),
+            ctx,
+            public_key,
+        );
     }
 
     /// Decrements NLWE at given index and return value after decrement
@@ -468,10 +448,14 @@ impl MNLUT {
     ) -> NLWE {
         assert_eq!(index.n(), self.m());
 
-        let nlwe = self.blind_tensor_access(index, ctx, public_key);
-        let mask = nlwe.carry_mask(false, ctx, public_key);
-        self.blind_tensor_add_no_carry(index, &mask, ctx, public_key);
-        nlwe.add_no_carry(&mask, ctx, public_key)
+        let (_, next) = self.blind_tensor_update(
+            index,
+            |nlwe| nlwe.decrement(ctx, public_key),
+            ctx,
+            public_key,
+        );
+
+        next
     }
 
     /// Sort the LUT using a blind counting sort by a key function
@@ -514,7 +498,7 @@ impl MNLUT {
             let nlwe = self.at(i as u64, ctx);
             let pos = count.blind_tensor_post_decrement(&NLWE::from(&nlwe[d]), ctx, public_key);
             // let pos = count.blind_post_decrement(&nlwe[d], ctx, public_key);
-            result.blind_tensor_init(&pos, &nlwe, ctx, public_key);
+            result.blind_tensor_add_digitwise_overflow(&pos, &nlwe, ctx, public_key);
             println!(
                 "added {:?} at index {:?}: {:?}",
                 nlwe.to_plain(ctx, private_key),
@@ -542,17 +526,14 @@ impl MNLUT {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
+    use std::{f32::NAN, time::Instant};
 
     use super::*;
     use crate::key;
     use itertools::Itertools;
-    use tfhe::{
-        core_crypto::prelude::lwe_ciphertext_sub_assign,
-        shortint::parameters::{
-            PARAM_MESSAGE_1_CARRY_0, PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_3_CARRY_0,
-            PARAM_MESSAGE_4_CARRY_0,
-        },
+    use tfhe::shortint::parameters::{
+        PARAM_MESSAGE_1_CARRY_0, PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_3_CARRY_0,
+        PARAM_MESSAGE_4_CARRY_0,
     };
 
     #[test]
@@ -586,22 +567,33 @@ mod tests {
 
     #[test]
     pub fn test_nlwe_add() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let p = ctx.full_message_modulus() as u64;
+        let n = 2;
+        let size = p.pow(n as u32);
         let private_key = key(ctx.parameters);
-        for i in 0..256 {
-            let a = NLWE::from_plain(i, 2, &mut ctx, &private_key);
-            for j in 0..256 {
-                let b = NLWE::from_plain(j, 2, &mut ctx, &private_key);
+        for i in 0..size {
+            let a = NLWE::from_plain(i, n, &mut ctx, &private_key);
+            for j in 0..size {
+                let b = NLWE::from_plain(j, n, &mut ctx, &private_key);
                 let start = Instant::now();
                 let c = a.add(&b, &ctx, &private_key.public_key);
-                println!("{:?}", Instant::now() - start);
-                assert_eq!(c.to_plain(&ctx, &private_key), (i + j) % 256);
+                let elapsed = Instant::now() - start;
+                println!(
+                    "{:?} + {:?} = {:?} {:?}",
+                    to_digits(i, n, p),
+                    to_digits(j, n, p),
+                    c.to_plain_digits(&ctx, private_key),
+                    elapsed
+                );
+                let dc = c.to_plain(&ctx, &private_key);
+                assert_eq!(dc, (i + j) % size);
             }
         }
     }
 
     #[test]
-    pub fn test_blind_read() {
+    pub fn test_blind_tensor_access() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
         let data = Vec::from_iter(0..16);
@@ -636,56 +628,9 @@ mod tests {
     }
 
     #[test]
-    pub fn test_blind_write() {
+    pub fn test_blind_tensor_add_no_carry() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
-
-        // println!("testing MNLUT M = 1, N = 1");
-        // let data = Vec::from_iter(0..16);
-        // let lut = MNLUT::from_plain(&data, 1, 1, &private_key, &mut ctx);
-        // for i in 0..16 {
-        //     for x in 0..16 {
-        //         let mut actual = lut.clone();
-        //         let index = NLWE::from_plain(i, 1, &mut ctx, &private_key);
-        //         let value = NLWE::from_plain(x, 1, &mut ctx, &private_key);
-        //         let start = Instant::now();
-        //         actual.blind_tensor_add_no_carry(&index, &value, &ctx, &private_key.public_key);
-        //         println!("{i} {x} ({:?})", Instant::now() - start);
-        //         let nlwe = actual.at(i, &ctx);
-        //         assert_eq!(
-        //             nlwe.to_plain(&ctx, &private_key),
-        //             (data[i as usize] + x) % 16
-        //         );
-        //     }
-        // }
-
-        // println!("testing MNLUT M = 1, N = 2");
-        // for i in 0..16 {
-        //     for x in (0..256).step_by(15) {
-        //         let index = NLWE::from_plain(i, 1, &mut ctx, &private_key);
-        //         let value = NLWE::from_plain(x, 2, &mut ctx, &private_key);
-        //         let start = Instant::now();
-        //         let actual =
-        //             MNLUT::blind_tensor_lift(&index, &value, &ctx, &private_key.public_key);
-        //         println!("{i} {x} ({:?})", Instant::now() - start);
-        //         let nlwe = actual.at(i, &ctx);
-        //         assert_eq!(nlwe.to_plain(&ctx, &private_key), x);
-        //     }
-        // }
-
-        // println!("testing MNLUT M = 2, N = 1");
-        // for i in (0..256).step_by(15) {
-        //     for x in 0..16 {
-        //         let index = NLWE::from_plain(i, 2, &mut ctx, &private_key);
-        //         let value = NLWE::from_plain(x, 1, &mut ctx, &private_key);
-        //         let start = Instant::now();
-        //         let actual =
-        //             MNLUT::blind_tensor_lift(&index, &value, &ctx, &private_key.public_key);
-        //         println!("{i} {x} ({:?})", Instant::now() - start);
-        //         let nlwe = actual.at(i, &ctx);
-        //         assert_eq!(nlwe.to_plain(&ctx, &private_key), x);
-        //     }
-        // }
 
         println!("testing MNLUT M = 2, N = 2");
         // let data = Vec::from_iter(0..256);
@@ -699,7 +644,7 @@ mod tests {
             // let actual =
             //     MNLUT::blind_tensor_lift(&index, &value, &ctx, &private_key.public_key);
             //
-            lut.blind_tensor_add_no_carry(&index, &value, &ctx, &private_key.public_key);
+            lut.blind_tensor_add_digitwise_overflow(&index, &value, &ctx, &private_key.public_key);
             println!(
                 "add {} to lut at {} ({:?})",
                 i,
@@ -780,13 +725,12 @@ mod tests {
 
     #[test]
     pub fn test_blind_radix_sort() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
-        let (m, n) = (1, 1);
+        let (m, n) = (2, 2);
         let size = ctx.full_message_modulus().pow(m as u32) as u64;
         let range = ctx.full_message_modulus().pow(n as u32) as u64;
-        let data = Vec::from_iter((0..size as u64).rev());
-        let data = vec![3, 3, 2, 1];
+        let data = Vec::from_iter((0..size as u64).map(|x| x % range).rev());
         println!("{:?}", data);
         let lut = MNLUT::from_plain(&data, m, n, &private_key, &mut ctx);
         let start = Instant::now();
@@ -802,29 +746,6 @@ mod tests {
         for i in 0..size {
             let nlwe = sorted.at(i, &ctx);
             assert_eq!(nlwe.to_plain(&ctx, &private_key), *expected[i as usize]);
-        }
-    }
-
-    #[test]
-    pub fn test_lut_id() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(ctx.parameters);
-        let public_key = &private_key.public_key;
-        let p = ctx.full_message_modulus() as u64;
-        let lut = LUT::from_function(|x| x, &ctx);
-
-        for j in 0..4 * p {
-            let full = private_key.allocate_and_encrypt_lwe(j, &mut ctx);
-            println!("{j} dec {:?}", private_key.decrypt_lwe(&full, &ctx));
-        }
-
-        for i in 0..p {
-            let index = private_key.allocate_and_encrypt_lwe(i, &mut ctx);
-            // let x = public_key.blind_array_access(&index, &lut, &ctx);
-            let rotated = public_key.blind_rotation(&index, &lut, &ctx);
-            let x = public_key.lut_extract(&rotated, 0, &ctx);
-            let dec = private_key.decrypt_lwe(&x, &ctx);
-            assert_eq!(dec, i);
         }
     }
 }
