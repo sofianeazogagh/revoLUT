@@ -33,7 +33,7 @@ pub fn main() {
     let private_key = revolut::key(ctx.parameters());
     let public_key = private_key.get_public_key();
 
-    let cleartext_vec = [1, 2, 4, 3];
+    let cleartext_vec = [4, 1, 4, 1];
     let mut ciphertext_vec :Vec<LweCiphertext<Vec<u64>>> = Vec::new();
 
     // encrypt the cleartext_vec
@@ -69,7 +69,10 @@ pub fn main() {
     // loop and search for min and armgin
     for i in 1..ciphertext_vec.len() {
         let e = ciphertext_vec[i].clone();
-        let b = public_key.blind_matrix_access(&comparison_matrix_lut, &min, &e, &mut ctx);
+        let b = public_key.blind_matrix_access_mv(&comparison_matrix, &min, &e, &mut ctx);
+
+        let lut = LUT::from_vec_trivially(&vec![0, 0, 1], &ctx);
+        let b = public_key.blind_array_access(&b, &lut, &ctx);
 
         let enc_i = public_key.allocate_and_trivially_encrypt_lwe(i as u64, &ctx);
         let lut_indices = LUT::from_vec_of_lwe(&[enc_i, argmin.clone()], public_key, &ctx);
