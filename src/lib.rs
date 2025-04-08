@@ -1318,7 +1318,7 @@ impl PublicKey {
         LUT(result_glwe)
     }
 
-    pub fn blind_kmin(&self, lut: LUT, ctx: &Context, k: usize) -> LWE {
+    pub fn blind_kmin_all_distinct(&self, lut: LUT, ctx: &Context, k: usize) -> LWE {
         let n = ctx.full_message_modulus() as u64;
         let id = LUT::from_vec_trivially(&Vec::from_iter(0..n), ctx); // should be cached
         let permutation = lut.to_many_lwe(&self, ctx);
@@ -1334,18 +1334,28 @@ impl PublicKey {
         self.blind_array_access(&k, &indices, ctx)
     }
 
-    pub fn blind_argmin(&self, lut: LUT, ctx: &Context) -> LWE {
-        self.blind_kmin(lut, ctx, 0)
+    pub fn blind_argmin_all_distinct(&self, lut: LUT, ctx: &Context) -> LWE {
+        self.blind_kmin_all_distinct(lut, ctx, 0)
     }
 
-    pub fn blind_argmax(&self, lut: LUT, ctx: &Context) -> LWE {
-        self.blind_kmin(lut, ctx, ctx.full_message_modulus() - 1)
+    pub fn blind_argmax_all_distinct(&self, lut: LUT, ctx: &Context) -> LWE {
+        self.blind_kmin_all_distinct(lut, ctx, ctx.full_message_modulus() - 1)
     }
 
     pub fn blind_lt_bma_mv(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
         let n = ctx.full_message_modulus;
         let matrix = Vec::from_iter(
             (0..n).map(|lin| Vec::from_iter((0..n).map(|col| if lin < col { 1 } else { 0 }))),
+        );
+        let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
+        let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
+        self.blind_array_access(&twice_bit, &lut, &ctx)
+    }
+
+    pub fn blind_gt_bma_mv(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
+        let n = ctx.full_message_modulus;
+        let matrix = Vec::from_iter(
+            (0..n).map(|lin| Vec::from_iter((0..n).map(|col| if lin > col { 1 } else { 0 }))),
         );
         let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
         let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
@@ -1637,18 +1647,48 @@ impl PublicKey {
         acc
     }
 
-    pub fn to_shortint_ciphertext(&self, lwe: LWE, ctx: &Context) -> Ciphertext {
-        let ct = Ciphertext::new(
-            lwe,
-            Degree::new(ctx.parameters().message_modulus.0 - 1),
-            NoiseLevel::NOMINAL,
-            // ctx.parameters().message_modulus,
-            MessageModulus(4),
-            // ctx.parameters().carry_modulus,
-            CarryModulus(4),
-            PBSOrder::KeyswitchBootstrap,
-        );
-        ct
+    pub fn blind_argmin(&self, lwes: &[LWE], ctx: &Context) -> LWE {
+        // initialize min to the first element, and argmin to its index
+        let mut min = lwes[0].clone();
+        let mut argmin = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+
+        // loop and search for min and armgin
+        for i in 1..lwes.len() {
+            let e = lwes[i].clone();
+            // blind lt mv
+            let b = self.blind_lt_bma_mv(&min, &e, ctx);
+
+            let arg_e = self.allocate_and_trivially_encrypt_lwe(i as u64, &ctx);
+            let lut_indices = LUT::from_vec_of_lwe(&[arg_e, argmin], self, &ctx);
+            let lut_messages = LUT::from_vec_of_lwe(&[e, min], self, &ctx);
+
+            argmin = self.blind_array_access(&b, &lut_indices, &ctx);
+            min = self.blind_array_access(&b, &lut_messages, &ctx);
+        }
+
+        argmin
+    }
+
+    pub fn blind_argmax(&self, lwes: &[LWE], ctx: &Context) -> LWE {
+        // initialize min to the first element, and argmin to its index
+        let mut max = lwes[0].clone();
+        let mut argmax = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+
+        // loop and search for min and armgin
+        for i in 1..lwes.len() {
+            let e = lwes[i].clone();
+            // blind lt mv
+            let b = self.blind_gt_bma_mv(&max, &e, ctx);
+
+            let arg_e = self.allocate_and_trivially_encrypt_lwe(i as u64, &ctx);
+            let lut_indices = LUT::from_vec_of_lwe(&[arg_e, argmax], self, &ctx);
+            let lut_messages = LUT::from_vec_of_lwe(&[e, max], self, &ctx);
+
+            argmax = self.blind_array_access(&b, &lut_indices, &ctx);
+            max = self.blind_array_access(&b, &lut_messages, &ctx);
+        }
+
+        argmax
     }
 
     pub fn blind_count(&self, lut: &LUT, ctx: &Context, private_key: &PrivateKey) -> LUT {
@@ -2104,113 +2144,7 @@ mod test {
     use itertools::Itertools;
     use quickcheck::TestResult;
     use rand::seq::SliceRandom;
-    use tfhe::integer::ciphertext::BaseCrtCiphertext;
-    use tfhe::integer::ciphertext::BaseRadixCiphertext;
-    use tfhe::integer::ClientKey as IntegerClientKey;
-    use tfhe::integer::CrtClientKey;
-    use tfhe::integer::IntegerCiphertext;
-    use tfhe::integer::ServerKey as IntegerServerKey;
     use tfhe::shortint::parameters::*;
-    use tfhe::shortint::ClientKey as ShortintClientKey;
-    #[test]
-    fn test_radix_representation() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(ctx.parameters);
-        // let private_key = PrivateKey::new(&mut ctx);
-        let public_key = &private_key.public_key;
-
-        let params: ClassicPBSParameters = ClassicPBSParameters {
-            message_modulus: MessageModulus(4),
-            carry_modulus: CarryModulus(4),
-            ..PARAM_MESSAGE_4_CARRY_0
-        };
-
-        let shortint_client_key = ShortintClientKey::from_raw_parts(
-            private_key.get_glwe_sk().clone(),
-            private_key.get_small_lwe_sk().clone(),
-            // ctx.parameters.into(),
-            params.into(),
-        );
-        let integer_client_key = IntegerClientKey::from(shortint_client_key);
-        let integer_server_key = IntegerServerKey::new_radix_server_key(&integer_client_key);
-        let lwe0 = public_key.allocate_and_trivially_encrypt_lwe(0, &ctx);
-        let ct0 = public_key.to_shortint_ciphertext(lwe0, &ctx);
-
-        let mut ciphertexts = vec![];
-
-        let msg = 2u64;
-        for _ in 0..10 {
-            let lwe = private_key.allocate_and_encrypt_lwe(msg, &mut ctx);
-            let ct = public_key.to_shortint_ciphertext(lwe, &ctx);
-            ciphertexts.push(BaseRadixCiphertext::from_blocks(vec![ct, ct0.clone()]));
-        }
-
-        let decrypted_values: Vec<u64> = ciphertexts
-            .iter()
-            .map(|ct| integer_client_key.decrypt_radix(&ct))
-            .collect();
-
-        for (i, value) in decrypted_values.iter().enumerate() {
-            println!("Decrypted value {}: {}", i + 1, value);
-        }
-
-        // let res = integer_server_key.add_parallelized(&ct1_big_int, &ct2_big_int);
-
-        let mut res = BaseRadixCiphertext::from_blocks(vec![ct0.clone(), ct0.clone()]);
-        ciphertexts
-            .iter()
-            .for_each(|ct| integer_server_key.add_assign_parallelized(&mut res, &ct));
-
-        let res_dec: u64 = integer_client_key.decrypt_radix(&res);
-
-        println!("res_dec: {}", res_dec);
-    }
-
-    #[test]
-    fn test_crt_representation() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(ctx.parameters);
-        // let private_key = PrivateKey::new(&mut ctx);
-        let msg1 = 1u64;
-        let msg2 = 0u64;
-        let lwe1 = private_key.allocate_and_encrypt_lwe(msg1, &mut ctx);
-        let lwe2 = private_key.allocate_and_encrypt_lwe(msg2, &mut ctx);
-        let public_key = &private_key.public_key;
-        let ct1 = public_key.to_shortint_ciphertext(lwe1, &ctx);
-        let ct2 = public_key.to_shortint_ciphertext(lwe2, &ctx);
-
-        let shortint_client_key = ShortintClientKey::from_raw_parts(
-            private_key.get_glwe_sk().clone(),
-            private_key.get_small_lwe_sk().clone(),
-            ctx.parameters.into(),
-        );
-
-        let integer_client_key = IntegerClientKey::from(shortint_client_key);
-        let crt_client_key = CrtClientKey::from((integer_client_key.clone(), vec![2, 3]));
-        let integer_server_key = IntegerServerKey::new_crt_server_key(&crt_client_key);
-        // let lwe0 = public_key.allocate_and_trivially_encrypt_lwe(2, &ctx);
-        // let ct0 = public_key.to_shortint_ciphertext(lwe0, &ctx);
-
-        // let blocks_1 = vec![ct1, ct0.clone()]; // 1 mod 2, 2 mod 3 = 5
-        let blocks_1 = vec![ct1, ct2]; // 1 mod 3, 1 mod 5
-                                       // let blocks_2 = vec![ct2, ct0.clone()]; // 1 mod 2, 2 mod 3 = 5
-        let mut ct1_big_int = BaseCrtCiphertext::from_blocks(blocks_1);
-        // let mut ct2_big_int = BaseCrtCiphertext::from_blocks(blocks_2);
-
-        // let is_possible =
-        //     integer_server_key.is_crt_add_possible(&mut ct1_big_int, &mut ct2_big_int);
-        // println!("is_possible: {:?}", is_possible);
-
-        // let res = integer_server_key.smart_crt_add(&mut ct1_big_int, &mut ct2_big_int);
-        // let res_dec: u64 = crt_client_key.decrypt(&res);
-
-        let ct1_dec: u64 = integer_client_key.decrypt_crt(&ct1_big_int);
-        // let ct2_dec: u64 = integer_client_key.decrypt_crt(&ct2_big_int);
-
-        println!("ct1_dec: {}", ct1_dec);
-        // println!("ct2_dec: {}", ct2_dec);
-        // println!("res_dec: {}", res_dec);
-    }
 
     #[test]
     fn test_lwe_add() {
@@ -2652,7 +2586,7 @@ mod test {
             lut.print(&private_key, &ctx);
 
             let begin = Instant::now();
-            let actual = public_key.blind_argmin(lut, &ctx);
+            let actual = public_key.blind_argmin_all_distinct(lut, &ctx);
             let elapsed = Instant::now() - begin;
             let decrypted = private_key.decrypt_lwe(&actual, &ctx);
             println!("actual: {} ({:?}): ", decrypted, elapsed);
@@ -3364,6 +3298,63 @@ mod test {
         let actual = private_key.decrypt_lwe(&ciphertext, &ctx);
 
         assert_eq!(actual, 15);
+    }
+
+    #[test]
+    fn test_blind_argmin() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let vec = vec![3, 2, 3];
+
+        let lwes = vec
+            .iter()
+            .map(|x| private_key.allocate_and_encrypt_lwe(*x, &mut ctx))
+            .collect::<Vec<_>>();
+
+        let argmin = public_key.blind_argmin(&lwes, &ctx);
+
+        let actual = private_key.decrypt_lwe(&argmin, &ctx);
+        assert_eq!(actual, 1);
+
+        println!("argmin: {}", actual);
+        println!(
+            "expected: {}",
+            vec.iter()
+                .enumerate()
+                .min_by_key(|&(_, item)| item)
+                .unwrap()
+                .0
+        );
+    }
+
+    #[test]
+    fn test_blind_argmax() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let vec = vec![1, 10, 2];
+
+        let lwes = vec
+            .iter()
+            .map(|x| private_key.allocate_and_encrypt_lwe(*x, &mut ctx))
+            .collect::<Vec<_>>();
+
+        let argmax = public_key.blind_argmax(&lwes, &ctx);
+        let actual = private_key.decrypt_lwe(&argmax, &ctx);
+        assert_eq!(actual, 1);
+
+        println!("argmax: {}", actual);
+        println!(
+            "expected: {}",
+            vec.iter()
+                .enumerate()
+                .max_by_key(|&(_, item)| item)
+                .unwrap()
+                .0
+        );
     }
 
     #[test]
