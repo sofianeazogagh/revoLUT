@@ -1362,6 +1362,16 @@ impl PublicKey {
         self.blind_array_access(&twice_bit, &lut, &ctx)
     }
 
+    pub fn blind_eq_bma_mv(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
+        let n = ctx.full_message_modulus;
+        let matrix = Vec::from_iter(
+            (0..n).map(|lin| Vec::from_iter((0..n).map(|col| if lin == col { 1 } else { 0 }))),
+        );
+        let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
+        let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
+        self.blind_array_access(&twice_bit, &lut, &ctx)
+    }
+
     // TODO : a revoir
     // Retrieve an element from a `lut` given it `index` and return the retrieved element with the new lut
     pub fn blind_retrieve(&self, lut: &mut LUT, index_retrieve: LWE, ctx: &Context) -> (LWE, LUT) {
@@ -1691,15 +1701,21 @@ impl PublicKey {
         argmax
     }
 
-    pub fn blind_count(&self, lut: &LUT, ctx: &Context, private_key: &PrivateKey) -> LUT {
+    pub fn blind_count(&self, lwes: &[LWE], ctx: &Context) -> Vec<LWE> {
         let mut count = LUT::from_vec_trivially(&vec![0; ctx.full_message_modulus()], ctx);
         let one = self.allocate_and_trivially_encrypt_lwe(1, ctx);
-        for i in 0..ctx.full_message_modulus() {
+        let lut = LUT::from_vec_of_lwe(lwes, self, ctx);
+        for i in 0..lwes.len() {
             let j = self.lut_extract(&lut, i, ctx);
             self.blind_array_increment(&mut count, &j, &one, ctx);
-            count.print(private_key, ctx);
         }
-        count
+        count.to_many_lwe(self, ctx)
+    }
+
+    pub fn blind_majority(&self, lwes: &[LWE], ctx: &Context) -> LWE {
+        let count = self.blind_count(lwes, ctx);
+        let maj = self.blind_argmax(&count, ctx);
+        maj
     }
 }
 
@@ -3342,7 +3358,10 @@ mod test {
             .map(|x| private_key.allocate_and_encrypt_lwe(*x, &mut ctx))
             .collect::<Vec<_>>();
 
+        let start = Instant::now();
         let argmax = public_key.blind_argmax(&lwes, &ctx);
+        let end = Instant::now();
+        println!("time taken: {:?}", end.duration_since(start));
         let actual = private_key.decrypt_lwe(&argmax, &ctx);
         assert_eq!(actual, 1);
 
@@ -3358,22 +3377,49 @@ mod test {
     }
 
     #[test]
-    fn test_op_blind_count() {
+    fn test_blind_count_operation() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
         let vec = vec![1, 2, 3, 1, 5];
-        let lut  = LUT::from_vec(&vec, &private_key, &mut ctx);
 
-        let count = public_key.blind_count(&lut,&ctx, private_key, );
-        let actual = count.to_array(private_key, &ctx);
+        let lwes = vec
+            .iter()
+            .map(|x| private_key.allocate_and_encrypt_lwe(*x, &mut ctx))
+            .collect::<Vec<_>>();
 
+        let count = public_key.blind_count(&lwes, &ctx);
+        let actual = private_key.decrypt_lwe_vector(&count, &ctx);
 
-        println!("{:?}", actual);
+        println!("actual: {:?}", actual);
 
-        
+        let mut expected = vec![0; ctx.full_message_modulus()];
+        for &val in &vec {
+            expected[val as usize] += 1;
+        }
+        println!("expected: {:?}", expected);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_blind_majority() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+        let vec = vec![1, 3, 2, 2, 1, 3, 1, 2, 3, 2];
+
+        let lwes = vec
+            .iter()
+            .map(|x| private_key.allocate_and_encrypt_lwe(*x, &mut ctx))
+            .collect::<Vec<_>>();
+
+        let start = Instant::now();
+        let maj = public_key.blind_majority(&lwes, &ctx);
+        let end = Instant::now();
+        println!("time taken: {:?}", end.duration_since(start));
+        let actual = private_key.decrypt_lwe(&maj, &ctx);
+        println!("actual: {}", actual);
+        assert_eq!(actual, 2);
     }
 }
-
-

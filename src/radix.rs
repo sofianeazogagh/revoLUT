@@ -6,6 +6,7 @@ use tfhe::core_crypto::algorithms::lwe_ciphertext_add_assign;
 use crate::{key, Context, PrivateKey, PublicKey, LUT, LWE};
 
 /// A byte represented by two lwe ciphertexts
+#[derive(Clone)]
 pub struct ByteLWE {
     pub lo: LWE,
     pub hi: LWE,
@@ -293,6 +294,44 @@ impl PublicKey {
         ByteLWE { lo, hi }
     }
 
+    pub fn blind_lt_byte_lwe(&self, a: &ByteLWE, b: &ByteLWE, ctx: &Context) -> LWE {
+        let c1 = self.blind_lt_bma_mv(&a.hi, &b.hi, ctx);
+        let c2 = self.blind_lt_bma_mv(&a.lo, &b.lo, ctx);
+        let eq = self.blind_eq_bma_mv(&a.hi, &b.hi, ctx);
+
+        // eq and c2
+        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let lut_and = LUT::from_vec_of_lwe(&[zero, c2], self, ctx);
+        let mut t = self.blind_array_access(&eq, &lut_and, ctx);
+
+        // c1 or (eq and c2)
+        let mut or = vec![1u64; ctx.full_message_modulus];
+        or[0] = 0;
+        let lut_or = LUT::from_vec_trivially(&or, ctx);
+        lwe_ciphertext_add_assign(&mut t, &c1);
+
+        self.blind_array_access(&t, &lut_or, ctx)
+    }
+
+    pub fn blind_gt_byte_lwe(&self, a: &ByteLWE, b: &ByteLWE, ctx: &Context) -> LWE {
+        let c1 = self.blind_gt_bma_mv(&a.hi, &b.hi, ctx);
+        let c2 = self.blind_gt_bma_mv(&a.lo, &b.lo, ctx);
+        let eq = self.blind_eq_bma_mv(&a.hi, &b.hi, ctx);
+
+        // eq and c2
+        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let lut_and = LUT::from_vec_of_lwe(&[zero, c2], self, ctx);
+        let mut t = self.blind_array_access(&eq, &lut_and, ctx);
+
+        // c1 or (eq and c2)
+        let mut or = vec![1u64; ctx.full_message_modulus];
+        or[0] = 0;
+        let lut_or = LUT::from_vec_trivially(&or, ctx);
+        lwe_ciphertext_add_assign(&mut t, &c1);
+
+        self.blind_array_access(&t, &lut_or, ctx)
+    }
+
     pub fn keyed_blind_counting_sort(
         &self,
         bblut: &ByteByteLUT,
@@ -524,5 +563,45 @@ mod test {
         let start = Instant::now();
         public_key.keyed_blind_counting_sort(&bblut, |blwe| blwe.hi.clone(), &ctx);
         println!("total time elapsed: {:?}", Instant::now() - start);
+    }
+
+    #[test]
+    fn test_blind_lt_byte_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let a = 0x12;
+        let b = 0x12;
+
+        let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
+        let enc_b = ByteLWE::from_byte(b, &mut ctx, private_key);
+
+        let start = Instant::now();
+        let c = public_key.blind_lt_byte_lwe(&enc_a, &enc_b, &ctx);
+        println!("elapsed {:?}", Instant::now() - start);
+
+        let actual = private_key.decrypt_lwe(&c, &ctx);
+        assert_eq!(actual, (a < b) as u64);
+    }
+
+    #[test]
+    fn test_blind_gt_byte_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let a = 0x20;
+        let b = 0x12;
+
+        let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
+        let enc_b = ByteLWE::from_byte(b, &mut ctx, private_key);
+
+        let start = Instant::now();
+        let c = public_key.blind_gt_byte_lwe(&enc_a, &enc_b, &ctx);
+        println!("elapsed {:?}", Instant::now() - start);
+
+        let actual = private_key.decrypt_lwe(&c, &ctx);
+        assert_eq!(actual, (a > b) as u64);
     }
 }
