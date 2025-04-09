@@ -332,6 +332,42 @@ impl PublicKey {
         self.blind_array_access(&t, &lut_or, ctx)
     }
 
+    pub fn blind_argmax_byte_lwe(&self, lwes: &[ByteLWE], ctx: &Context) -> ByteLWE {
+        // initialize min to the first element, and argmin to its index
+        let mut max = lwes[0].clone();
+        let mut argmax = ByteLWE::from_byte_trivially(0x00, ctx, self);
+
+        // loop and search for min and armgin
+        for i in 1..lwes.len() {
+            let e = lwes[i].clone();
+            // blind lt mv
+            let b = self.blind_gt_byte_lwe(&max, &e, ctx);
+
+            let arg_e = ByteLWE::from_byte_trivially(i as u8, ctx, self);
+            let hi_lut_indices = LUT::from_vec_of_lwe(&[arg_e.hi, argmax.hi], self, ctx);
+            let lo_lut_indices = LUT::from_vec_of_lwe(&[arg_e.lo, argmax.lo], self, ctx);
+            let hi_lut_messages = LUT::from_vec_of_lwe(&[e.hi, max.hi], self, ctx);
+            let lo_lut_messages = LUT::from_vec_of_lwe(&[e.lo, max.lo], self, ctx);
+
+            let argmax_hi = self.blind_array_access(&b, &hi_lut_indices, ctx);
+            let argmax_lo = self.blind_array_access(&b, &lo_lut_indices, ctx);
+
+            let max_hi = self.blind_array_access(&b, &hi_lut_messages, ctx);
+            let max_lo = self.blind_array_access(&b, &lo_lut_messages, ctx);
+
+            max = ByteLWE {
+                hi: max_hi,
+                lo: max_lo,
+            };
+            argmax = ByteLWE {
+                hi: argmax_hi,
+                lo: argmax_lo,
+            };
+        }
+
+        argmax
+    }
+
     pub fn keyed_blind_counting_sort(
         &self,
         bblut: &ByteByteLUT,
@@ -603,5 +639,32 @@ mod test {
 
         let actual = private_key.decrypt_lwe(&c, &ctx);
         assert_eq!(actual, (a > b) as u64);
+    }
+
+    #[test]
+    fn test_blind_argmax_byte_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let mut items: [u8; 10] = std::array::from_fn(|i| i as u8);
+        items[7] = 0xFF;
+
+        println!("{:?}", items);
+        // let bblut = ByteByteLUT::from_bytes(&items, private_key, &mut ctx);
+        let lwes = items
+            .iter()
+            .map(|i| ByteLWE::from_byte(*i, &mut ctx, private_key))
+            .collect::<Vec<_>>();
+
+        let start = Instant::now();
+        let argmax = public_key.blind_argmax_byte_lwe(&lwes, &ctx);
+        println!("total time elapsed: {:?}", Instant::now() - start);
+
+        let actual = argmax.to_byte(&ctx, private_key);
+
+        let expected_max = items.iter().max().unwrap();
+        let expected = items.iter().position(|i| *i == *expected_max).unwrap();
+        assert_eq!(actual, expected as u8);
     }
 }
