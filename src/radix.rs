@@ -332,14 +332,14 @@ impl PublicKey {
         self.blind_array_access(&t, &lut_or, ctx)
     }
 
-    pub fn blind_argmax_byte_lwe(&self, lwes: &[ByteLWE], ctx: &Context) -> ByteLWE {
+    pub fn blind_argmax_byte_lwe(&self, blwes: &[ByteLWE], ctx: &Context) -> ByteLWE {
         // initialize min to the first element, and argmin to its index
-        let mut max = lwes[0].clone();
+        let mut max = blwes[0].clone();
         let mut argmax = ByteLWE::from_byte_trivially(0x00, ctx, self);
 
         // loop and search for min and armgin
-        for i in 1..lwes.len() {
-            let e = lwes[i].clone();
+        for i in 1..blwes.len() {
+            let e = blwes[i].clone();
             // blind lt mv
             let b = self.blind_gt_byte_lwe(&max, &e, ctx);
 
@@ -651,14 +651,13 @@ mod test {
         items[7] = 0xFF;
 
         println!("{:?}", items);
-        // let bblut = ByteByteLUT::from_bytes(&items, private_key, &mut ctx);
-        let lwes = items
+        let blwes = items
             .iter()
             .map(|i| ByteLWE::from_byte(*i, &mut ctx, private_key))
             .collect::<Vec<_>>();
 
         let start = Instant::now();
-        let argmax = public_key.blind_argmax_byte_lwe(&lwes, &ctx);
+        let argmax = public_key.blind_argmax_byte_lwe(&blwes, &ctx);
         println!("total time elapsed: {:?}", Instant::now() - start);
 
         let actual = argmax.to_byte(&ctx, private_key);

@@ -30,7 +30,7 @@ use rand::Rng;
 
 mod blind_sort;
 mod blind_topk;
-mod radix;
+pub mod radix;
 
 pub type LWE = LweCiphertext<Vec<u64>>;
 pub type GLWE = GlweCiphertext<Vec<u64>>;
