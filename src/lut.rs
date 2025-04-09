@@ -472,16 +472,13 @@ impl MNLUT {
         for nlwe in self.nlwes.iter() {
             count.blind_tensor_increment(&NLWE::from(&nlwe[d]), ctx, public_key);
             println!("{:?}", count.to_plain(ctx, private_key));
-            // count.blind_increment(&nlwe[d], ctx, public_key);
         }
         println!("count {:?}", Instant::now() - start);
 
         // compute the prefix sum
         println!("prefix sum");
         let start = Instant::now();
-        // let mut acc = Vec::from_iter((0..p).map(|i| count.at(i, ctx, public_key)));
         for i in 1..p {
-            // acc[i] = acc[i].add_no_carry(&acc[i - 1]);
             let prev = count.at(i as u64 - 1, ctx);
             let idx = IxDyn(&vec![i]);
             count.nlwes[&idx] = count.nlwes[&idx].add(&prev, ctx, public_key);
@@ -526,7 +523,7 @@ impl MNLUT {
 
 #[cfg(test)]
 mod tests {
-    use std::{f32::NAN, time::Instant};
+    use std::time::Instant;
 
     use super::*;
     use crate::key;
