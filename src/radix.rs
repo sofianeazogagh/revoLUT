@@ -394,18 +394,23 @@ mod test {
         }
     }
 
-    // #[quickcheck]
+    #[quickcheck]
     fn test_byte_lwe_add_qc(a: u8, b: u8) -> TestResult {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
+        let a = 0x01;
+        let b = 0x1f;
         let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
         let enc_b = ByteLWE::from_byte(b, &mut ctx, private_key);
         let start = Instant::now();
         let enc_c = public_key.byte_lwe_add(&enc_a, &enc_b, &ctx);
-        println!("elapsed {:?}", Instant::now() - start);
         let c = enc_c.to_byte(&ctx, private_key);
+        println!(
+            "elapsed {:?} {a:02x} {b:02x} {c:02x}",
+            Instant::now() - start
+        );
 
         TestResult::from_bool(c == a + b)
     }

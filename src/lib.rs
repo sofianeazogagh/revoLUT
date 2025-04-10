@@ -30,6 +30,8 @@ use rand::Rng;
 mod blind_sort;
 mod blind_topk;
 pub mod lut;
+pub mod nlwe;
+pub mod packed_lut;
 mod radix;
 
 pub type LWE = LweCiphertext<Vec<u64>>;
@@ -117,7 +119,7 @@ pub struct Context {
     delta: u64,
     full_message_modulus: usize,
     pub signed_decomposer: SignedDecomposer<u64>,
-    encryption_generator: EncryptionRandomGenerator<ActivatedRandomGenerator>,
+    pub encryption_generator: EncryptionRandomGenerator<ActivatedRandomGenerator>,
     secret_generator: SecretRandomGenerator<ActivatedRandomGenerator>,
     box_size: usize,
     ciphertext_modulus: CiphertextModulus,
@@ -2131,7 +2133,6 @@ mod test {
     use tfhe::integer::ciphertext::BaseCrtCiphertext;
     use tfhe::integer::ciphertext::BaseRadixCiphertext;
     use tfhe::integer::ClientKey as IntegerClientKey;
-    use tfhe::integer::CrtClientKey;
     use tfhe::integer::IntegerCiphertext;
     use tfhe::integer::ServerKey as IntegerServerKey;
     use tfhe::shortint::parameters::*;
@@ -3395,29 +3396,23 @@ mod test {
         let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
-        let p = ctx.full_message_modulus();
+        let p = ctx.full_message_modulus() as u64;
 
-        let data = Vec::from_iter((0..32).map(|_| Vec::from_iter(0..32u64)));
-        // let matrix = Vec::from_iter(
-        //     (0..16)
-        //         .map(|i| LUT::from_vec(&data[i], &private_key, &mut ctx))
-        //         // .map(|i| LUT::from_vec_trivially(&data[i], &ctx))
-        //         .collect::<Vec<_>>(),
-        // );
+        // let data = Vec::from_iter((0..p).map(|_| Vec::from_iter(0..p)));
+        let data = Vec::from_iter((0..p).map(|i| Vec::from_iter((0..p).map(|j| 1))));
 
-        for l in 0..16 {
+        for l in 0..p {
             let line = private_key.allocate_and_encrypt_lwe(l, &mut ctx);
-            for c in 0..16 {
+            for c in 0..p {
                 let column = private_key.allocate_and_encrypt_lwe(c, &mut ctx);
                 let start = Instant::now();
-                // let ciphertext = public_key.blind_matrix_access(&matrix, &line, &column, &ctx);
                 let ciphertext = public_key.blind_matrix_access_clear(&data, &line, &column, &ctx);
                 println!("elapsed: {:?}", Instant::now() - start);
                 let actual = private_key.decrypt_lwe(&ciphertext, &ctx);
+                let expected = data[l as usize][c as usize];
 
-                println!("({l}, {c}): {actual}");
-
-                assert_eq!(actual, data[l as usize][c as usize]);
+                println!("({l}, {c}): {actual} vs {expected}");
+                assert_eq!(actual, expected);
             }
         }
     }

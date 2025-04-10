@@ -3,11 +3,8 @@
 
 use std::time::Instant;
 
-use revolut::{
-    lut::{MNLUT, NLWE},
-    *,
-};
-use tfhe::shortint::parameters::*;
+use revolut::{lut::MNLUT, nlwe::NLWE, *};
+use tfhe::{core_crypto::prelude::blind_rotate_assign, shortint::parameters::*};
 
 // mod uni_test;
 // use uni_test::*;
@@ -64,19 +61,51 @@ pub fn bench_blind_read() {
 }
 
 pub fn main() {
-    // generate_keys();
-    // bench_blind_read();
-    let param = PARAM_MESSAGE_4_CARRY_0;
-    let mut ctx = Context::from(param);
-    let private_key = key(param);
+    let mut ctx = Context::from(PARAM_MESSAGE_6_CARRY_0);
+
+    let private_key = key(ctx.parameters());
     let public_key = &private_key.public_key;
-    for i in 0..=ctx.full_message_modulus().ilog2() {
-        println!("packing {} lwe into a lut", 2usize.pow(i));
+    let p = ctx.full_message_modulus() as u64;
+    let mut lut = LUT::from_function(|x| x, &ctx);
+
+    for _ in 0..10 {
         let lwe = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
         let start = Instant::now();
-        let lut = LUT::from_vec_of_lwe(&vec![lwe; 2usize.pow(i)], public_key, &ctx);
-        println!("==> elapsed {:?}", Instant::now() - start);
+        blind_rotate_assign(&lwe, &mut lut.0, &public_key.fourier_bsk);
+        println!("elapsed: {:?}", Instant::now() - start);
     }
+
+    // // let data = Vec::from_iter((0..p).map(|_| Vec::from_iter(0..p)));
+    // let data = Vec::from_iter((0..p).map(|i| Vec::from_iter((0..p).map(|j| 1))));
+
+    // for l in 0..5 {
+    //     let line = private_key.allocate_and_encrypt_lwe(l, &mut ctx);
+    //     for c in 0..5 {
+    //         let column = private_key.allocate_and_encrypt_lwe(c, &mut ctx);
+    //         let start = Instant::now();
+    //         let ciphertext = public_key.blind_matrix_access_clear(&data, &line, &column, &ctx);
+    //         println!("elapsed: {:?}", Instant::now() - start);
+    //         let actual = private_key.decrypt_lwe(&ciphertext, &ctx);
+    //         let expected = data[l as usize][c as usize];
+
+    //         println!("({l}, {c}): {actual} vs {expected}");
+    //         assert_eq!(actual, expected);
+    //     }
+    // }
+
+    // generate_keys();
+    // bench_blind_read();
+    // let param = PARAM_MESSAGE_4_CARRY_0;
+    // let mut ctx = Context::from(param);
+    // let private_key = key(param);
+    // let public_key = &private_key.public_key;
+    // for i in 0..=ctx.full_message_modulus().ilog2() {
+    //     println!("packing {} lwe into a lut", 2usize.pow(i));
+    //     let lwe = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
+    //     let start = Instant::now();
+    //     let lut = LUT::from_vec_of_lwe(&vec![lwe; 2usize.pow(i)], public_key, &ctx);
+    //     println!("==> elapsed {:?}", Instant::now() - start);
+    // }
 
     // for k in 2..10 {
     //     let now = std::time::Instant::now();
