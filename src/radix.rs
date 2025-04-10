@@ -58,6 +58,29 @@ impl NyblByteLUT {
         }
     }
 
+    pub fn from_vec_of_blwes(blwes: &[ByteLWE], public_key: &PublicKey, ctx: &Context) -> Self {
+        let lo = LUT::from_vec_of_lwe(
+            &Vec::from_iter(blwes.iter().map(|blwe| blwe.lo.clone())),
+            public_key,
+            ctx,
+        );
+        let hi = LUT::from_vec_of_lwe(
+            &Vec::from_iter(blwes.iter().map(|blwe| blwe.hi.clone())),
+            public_key,
+            ctx,
+        );
+        Self { lo, hi }
+    }
+
+    pub fn to_many_blwes(&self, public_key: &PublicKey, ctx: &Context) -> Vec<ByteLWE> {
+        let los = self.lo.to_many_lwe(public_key, ctx);
+        let his = self.hi.to_many_lwe(public_key, ctx);
+        los.into_iter()
+            .zip(his.into_iter())
+            .map(|(lo, hi)| ByteLWE { lo, hi })
+            .collect()
+    }
+
     pub fn at(&self, index: u8, ctx: &Context, public_key: &PublicKey) -> ByteLWE {
         ByteLWE {
             lo: public_key.lut_extract(&self.lo, index as usize, ctx),
@@ -136,7 +159,7 @@ impl NyblByteLUT {
         public_key.blind_array_set(&mut self.hi, &index, &value.hi, ctx);
     }
 
-    fn print(&self, private_key: &PrivateKey, ctx: &Context) {
+    pub fn print(&self, private_key: &PrivateKey, ctx: &Context) {
         self.lo.print(private_key, ctx);
         self.hi.print(private_key, ctx);
     }
@@ -493,12 +516,16 @@ mod test {
         let public_key = &private_key.public_key;
 
         let mut bblut = ByteByteLUT::from_bytes(&[0; 256], private_key, &mut ctx);
-        let index = ByteLWE::from_byte(0, &mut ctx, private_key);
+        println!("bblut before add:");
+        bblut.print(public_key, private_key, &ctx);
+        let index = ByteLWE::from_byte(5, &mut ctx, private_key);
         let value = ByteLWE::from_byte(1, &mut ctx, private_key);
 
         let start = Instant::now();
         bblut.blind_array_add(&index, &value, &ctx, public_key);
         println!("elapsed: {:?}", Instant::now() - start);
+        println!("bblut after add:");
+        bblut.print(public_key, private_key, &ctx);
 
         let ct = bblut.blind_array_access(&index, &ctx, public_key);
         let actual = ct.to_byte(&ctx, private_key);
