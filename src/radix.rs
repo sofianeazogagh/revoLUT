@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use rayon::vec;
 /// Assuming we work in param4
 use tfhe::core_crypto::algorithms::lwe_ciphertext_add_assign;
 
@@ -33,6 +34,7 @@ impl ByteLWE {
 }
 
 /// Structure indexing a byte by a nybble
+#[derive(Clone)]
 pub struct NyblByteLUT {
     pub lo: LUT,
     pub hi: LUT,
@@ -117,6 +119,22 @@ impl NyblByteLUT {
         self.blind_array_set(index, &new_value, ctx, public_key);
     }
 
+    /// add encrypted bit value at encrypted nyble index
+    pub fn blind_array_maybe_inc(
+        &mut self,
+        index: &LWE,
+        b: &LWE,
+        ctx: &Context,
+        public_key: &PublicKey,
+    ) {
+        // 2 br
+        let current = self.blind_array_access(index, ctx, public_key);
+        // 1 bma (17 br)
+        let new_value = public_key.byte_lwe_maybe_inc(&current, &b, ctx);
+        // 4 br
+        self.blind_array_set(index, &new_value, ctx, public_key);
+    }
+
     /// increment encrypted byte value at encrypted nybl index
     pub fn blind_array_inc(&mut self, index: &LWE, ctx: &Context, public_key: &PublicKey) {
         // 2 br
@@ -157,6 +175,19 @@ impl NyblByteLUT {
         public_key.blind_array_set(&mut self.lo, &index, &value.lo, ctx);
         // 2 br
         public_key.blind_array_set(&mut self.hi, &index, &value.hi, ctx);
+    }
+
+    // FIXME : this is not working : index out of bounds: the len is 2048 but the index is 2048
+    pub fn print_bytes(&self, public_key: &PublicKey, private_key: &PrivateKey, ctx: &Context) {
+        let mut result = vec![];
+        for i in 0x00..0xff {
+            println!("i: {}", i);
+            let blwe = self.at(i, ctx, public_key);
+            let byte = blwe.to_byte(ctx, private_key);
+            println!("byte: {}", byte);
+            result.push(byte);
+        }
+        println!("{:02X?}", result);
     }
 
     pub fn print(&self, private_key: &PrivateKey, ctx: &Context) {
@@ -314,6 +345,23 @@ impl PublicKey {
         let mut hi = self.nybl_carry(&a.lo, &b.lo, ctx);
         lwe_ciphertext_add_assign(&mut hi, &a.hi);
         lwe_ciphertext_add_assign(&mut hi, &b.hi);
+        ByteLWE { lo, hi }
+    }
+
+    /// This oddly named function increments an encrypted bit to a ByteLWE
+    pub fn byte_lwe_maybe_inc(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
+        let vec_inc: Vec<u64> = (0..ctx.full_message_modulus as u64).collect();
+        let lut_id = LUT::from_vec_trivially(&vec_inc, ctx);
+        let lut_maybe_inc = self.blind_rotation(&b, &lut_id, ctx);
+        let lo = self.blind_array_access(&a.lo, &lut_maybe_inc, ctx);
+        let t = self.blind_array_access(&a.hi, &lut_maybe_inc, ctx);
+
+        let mut vec_zero = vec![0; ctx.full_message_modulus];
+        vec_zero[ctx.full_message_modulus - 1] = 1;
+        let lut_last = LUT::from_vec_trivially(&vec_zero, ctx);
+        let selector = self.blind_array_access(&a.lo, &lut_last, ctx);
+        let lut_select = LUT::from_vec_of_lwe(&vec![a.hi.clone(), t], self, ctx);
+        let hi = self.blind_array_access(&selector, &lut_select, ctx);
         ByteLWE { lo, hi }
     }
 
@@ -499,12 +547,20 @@ mod test {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
+        let a = 0x02;
+        let b = 0x1F;
         let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
         let enc_b = ByteLWE::from_byte(b, &mut ctx, private_key);
         let start = Instant::now();
         let enc_c = public_key.byte_lwe_add(&enc_a, &enc_b, &ctx);
-        println!("elapsed {:?}", Instant::now() - start);
         let c = enc_c.to_byte(&ctx, private_key);
+        println!(
+            "elapsed {:?}, a: {:?}, b: {:?}, c: {:?}",
+            Instant::now() - start,
+            a,
+            b,
+            c
+        );
 
         TestResult::from_bool(c == a + b)
     }
@@ -674,10 +730,8 @@ mod test {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let mut items: [u8; 10] = std::array::from_fn(|i| i as u8);
-        items[7] = 0xFF;
+        let items: Vec<u8> = (0..16).map(|_| rand::random::<u8>()).collect();
 
-        println!("{:?}", items);
         let blwes = items
             .iter()
             .map(|i| ByteLWE::from_byte(*i, &mut ctx, private_key))
@@ -692,5 +746,30 @@ mod test {
         let expected_max = items.iter().max().unwrap();
         let expected = items.iter().position(|i| *i == *expected_max).unwrap();
         assert_eq!(actual, expected as u8);
+    }
+
+    #[quickcheck]
+    fn test_byte_lwe_maybe_inc_qc(a: u8, b: bool) -> TestResult {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
+        let enc_b = private_key.allocate_and_encrypt_lwe(b as u64, &mut ctx);
+
+        let start = Instant::now();
+        let c = public_key.byte_lwe_maybe_inc(&enc_a, &enc_b, &ctx);
+
+        let actual = c.to_byte(&ctx, private_key);
+        println!(
+            "elapsed {:?}, a: {:02X}, b: {:02X}, actual: {:02X}",
+            Instant::now() - start,
+            a,
+            b as u64,
+            actual
+        );
+        // assert_eq!(actual, 0x11);
+
+        TestResult::from_bool(actual == a + b as u8)
     }
 }
