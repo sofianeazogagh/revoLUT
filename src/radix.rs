@@ -177,14 +177,25 @@ impl NyblByteLUT {
         public_key.blind_array_set(&mut self.hi, &index, &value.hi, ctx);
     }
 
-    // FIXME : this is not working : index out of bounds: the len is 2048 but the index is 2048
+    pub fn to_bytes(
+        &self,
+        public_key: &PublicKey,
+        private_key: &PrivateKey,
+        ctx: &Context,
+    ) -> [u8; 16] {
+        let mut result = [0; 16];
+        for i in 0..16 {
+            let blwe = self.at(i as u8, ctx, public_key);
+            result[i] = blwe.to_byte(ctx, private_key);
+        }
+        result
+    }
+
     pub fn print_bytes(&self, public_key: &PublicKey, private_key: &PrivateKey, ctx: &Context) {
         let mut result = vec![];
-        for i in 0x00..0xff {
-            println!("i: {}", i);
+        for i in 0..16 {
             let blwe = self.at(i, ctx, public_key);
             let byte = blwe.to_byte(ctx, private_key);
-            println!("byte: {}", byte);
             result.push(byte);
         }
         println!("{:02X?}", result);

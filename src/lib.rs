@@ -1161,6 +1161,41 @@ impl PublicKey {
         }
     }
 
+    /// PIR-like construction to access a matrix element blindly, returns Enc(matrix[x][y])
+    /// time: 2BR + pKS
+    pub fn blind_matrix_access_clear(
+        &self,
+        matrix: &Vec<Vec<u64>>,
+        x: &LWE,
+        y: &LWE,
+        ctx: &Context,
+    ) -> LWE {
+        let p = ctx.full_message_modulus;
+        let mut lut = LUT::from_vec_trivially(&vec![1], ctx);
+        self.blind_rotation_assign(&self.neg_lwe(&x, &ctx), &mut lut, ctx);
+        let onehot = lut.to_many_lwe(&self, ctx);
+        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let l = matrix
+            .iter()
+            .enumerate()
+            .map(|(i, line)| {
+                let xi = onehot[i].clone();
+                Vec::from_iter(line.iter().map(|elt| {
+                    let mut output = xi.clone();
+                    lwe_ciphertext_cleartext_mul_assign(&mut output, Cleartext(*elt));
+                    output
+                }))
+            })
+            .fold(vec![zero; p], |mut acc, elt| {
+                acc.iter_mut()
+                    .zip(elt.iter())
+                    .for_each(|(dst, src)| lwe_ciphertext_add_assign(dst, src));
+                acc
+            });
+        let lut = LUT::from_vec_of_lwe(&l, &self, ctx);
+        self.blind_array_access(&y, &lut, ctx)
+    }
+
     pub fn blind_matrix_set(
         &self,
         matrix: &mut [LUT],
@@ -1347,9 +1382,10 @@ impl PublicKey {
         let matrix = Vec::from_iter(
             (0..n).map(|lin| Vec::from_iter((0..n).map(|col| if lin < col { 1 } else { 0 }))),
         );
-        let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
-        let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
-        self.blind_array_access(&twice_bit, &lut, &ctx)
+        // let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
+        // let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
+        // self.blind_array_access(&twice_bit, &lut, &ctx)
+        self.blind_matrix_access_clear(&matrix, &a, &b, &ctx)
     }
 
     pub fn blind_gt_bma_mv(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
@@ -1357,9 +1393,7 @@ impl PublicKey {
         let matrix = Vec::from_iter(
             (0..n).map(|lin| Vec::from_iter((0..n).map(|col| if lin > col { 1 } else { 0 }))),
         );
-        let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
-        let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
-        self.blind_array_access(&twice_bit, &lut, &ctx)
+        self.blind_matrix_access_clear(&matrix, &a, &b, &ctx)
     }
 
     pub fn blind_eq_bma_mv(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
@@ -1367,9 +1401,7 @@ impl PublicKey {
         let matrix = Vec::from_iter(
             (0..n).map(|lin| Vec::from_iter((0..n).map(|col| if lin == col { 1 } else { 0 }))),
         );
-        let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
-        let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
-        self.blind_array_access(&twice_bit, &lut, &ctx)
+        self.blind_matrix_access_clear(&matrix, &a, &b, &ctx)
     }
 
     // TODO : a revoir
