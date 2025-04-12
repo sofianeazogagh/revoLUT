@@ -254,20 +254,6 @@ impl ByteByteLUT {
         Self { lo, hi }
     }
 
-    pub fn from_vec_of_lwe(lwes: &[LWE], public_key: &PublicKey, ctx: &Context) -> Self {
-        let lo: [LUT; 16] = std::array::from_fn(|_| {
-            LUT::from_vec_of_lwe(
-                &Vec::from_iter(lwes.iter().map(|lwe| lwe.clone())),
-                public_key,
-                ctx,
-            )
-        });
-        let hi: [LUT; 16] = std::array::from_fn(|_| {
-            LUT::from_vec_trivially(&vec![0; ctx.full_message_modulus], ctx)
-        });
-        Self { lo, hi }
-    }
-
     pub fn print(&self, public_key: &PublicKey, private_key: &PrivateKey, ctx: &Context) {
         let mut result = vec![];
         for i in 0x00..=0xff {
