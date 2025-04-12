@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+#[allow(unused)]
 use rayon::vec;
 /// Assuming we work in param4
 use tfhe::core_crypto::algorithms::lwe_ciphertext_add_assign;
@@ -249,6 +250,20 @@ impl ByteByteLUT {
                 &Vec::from_iter((0..16).map(|c| ((input[(l << 4) + c] >> 4) % 16) as u64)),
                 ctx,
             )
+        });
+        Self { lo, hi }
+    }
+
+    pub fn from_vec_of_lwe(lwes: &[LWE], public_key: &PublicKey, ctx: &Context) -> Self {
+        let lo: [LUT; 16] = std::array::from_fn(|_| {
+            LUT::from_vec_of_lwe(
+                &Vec::from_iter(lwes.iter().map(|lwe| lwe.clone())),
+                public_key,
+                ctx,
+            )
+        });
+        let hi: [LUT; 16] = std::array::from_fn(|_| {
+            LUT::from_vec_trivially(&vec![0; ctx.full_message_modulus], ctx)
         });
         Self { lo, hi }
     }
@@ -558,8 +573,6 @@ mod test {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let a = 0x02;
-        let b = 0x1F;
         let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
         let enc_b = ByteLWE::from_byte(b, &mut ctx, private_key);
         let start = Instant::now();
