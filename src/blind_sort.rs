@@ -275,11 +275,11 @@ mod tests {
         let elapsed = Instant::now() - begin;
         println!("run ({:?})", elapsed);
 
-        let expected_array = vec![0, 0, 0, 0, 1, 1, 2, 3];
+        let _expected_array = vec![0, 0, 0, 0, 1, 1, 2, 3];
         for i in 0..array.len() {
             let lwe = public_key.lut_extract(&sorted_lut, i, &ctx);
-            let actual = private_key.decrypt_lwe(&lwe, &ctx);
-            // assert_eq!(actual, expected_array[i]);
+            let _actual = private_key.decrypt_lwe(&lwe, &ctx);
+            // assert_eq!(_actual, _expected_array[i]);
         }
         // }
     }
