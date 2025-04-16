@@ -3,7 +3,10 @@ use std::time::Instant;
 #[allow(unused)]
 use rayon::vec;
 /// Assuming we work in param4
-use tfhe::core_crypto::algorithms::lwe_ciphertext_add_assign;
+use tfhe::core_crypto::{
+    algorithms::lwe_ciphertext_add_assign,
+    prelude::{lwe_ciphertext_sub, lwe_ciphertext_sub_assign},
+};
 
 use crate::{key, Context, PrivateKey, PublicKey, LUT, LWE};
 
@@ -140,12 +143,15 @@ impl NyblByteLUT {
     pub fn blind_array_inc(&mut self, index: &LWE, ctx: &Context, public_key: &PublicKey) {
         // 2 br
         let lo = public_key.blind_array_access(&index, &self.lo, ctx);
+        let successor = LUT::from_function(|x| (x + 1) % ctx.full_message_modulus as u64, ctx);
+
+        let mut successor_lo = public_key.blind_array_access(&lo, &successor, ctx);
+
         let lut = LUT::from_function(|x| if x == 15 { 1 } else { 0 }, ctx);
         let carry = public_key.blind_array_access(&lo, &lut, ctx);
 
-        // 2 br
-        let one = public_key.allocate_and_trivially_encrypt_lwe(1, ctx);
-        public_key.blind_array_increment(&mut self.lo, &index, &one, ctx);
+        lwe_ciphertext_sub_assign(&mut successor_lo, &lo);
+        public_key.blind_array_increment(&mut self.lo, &index, &successor_lo, ctx);
         public_key.blind_array_increment(&mut self.hi, &index, &carry, ctx);
     }
 
