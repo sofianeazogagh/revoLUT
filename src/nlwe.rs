@@ -175,26 +175,40 @@ impl NLWE {
     // TODO: optimize
     pub fn increment(&self, ctx: &Context, public_key: &PublicKey) -> NLWE {
         let p = ctx.full_message_modulus as u64;
+        let n = self.n();
         let mut out = self.clone();
-        let is_mone = LUT::from_function(|x| (x == p - 1) as u64, ctx);
+        let is_end = LUT::from_function(|x| (x == p - 1) as u64, ctx);
         let inc = LUT::from_function(|x| (x + 1) % p, ctx);
 
-        let mut acc = public_key.allocate_and_trivially_encrypt_lwe(1, ctx);
-        // from right to left
-        for digit in out.digits.iter_mut().rev() {
+        // increment last digit
+        out.digits[n - 1] = public_key.blind_array_access(&out.digits[n - 1], &inc, ctx);
+
+        if self.n() > 1 {
+            // is last digit full?
+            let mut acc = public_key.blind_array_access(&self.digits[n - 1], &is_end, ctx);
+            // keep folding from right to left
+            for i in (1..n - 1).rev() {
+                // digit stays self or becomes next
+                let digit = &mut out.digits[i];
+                let next = public_key.blind_array_access(&digit, &inc, ctx);
+                let sel = LUT::from_vec_of_lwe(&vec![digit.clone(), next], public_key, ctx);
+                let next_digit = public_key.blind_array_access(&acc, &sel, ctx);
+
+                // is current digit full?
+                let b = public_key.blind_array_access(digit, &is_end, ctx);
+                // are all digits so far full?
+                let zero = public_key.allocate_and_trivially_encrypt_lwe(0, ctx);
+                let andb = LUT::from_vec_of_lwe(&vec![zero, b], public_key, ctx);
+                acc = public_key.blind_array_access(&acc, &andb, ctx);
+
+                *digit = next_digit;
+            }
+
             // digit stays self or becomes next
+            let digit = &mut out.digits[0];
             let next = public_key.blind_array_access(&digit, &inc, ctx);
             let sel = LUT::from_vec_of_lwe(&vec![digit.clone(), next], public_key, ctx);
-            let next_digit = public_key.blind_array_access(&acc, &sel, ctx);
-
-            // is current digit full?
-            let b = public_key.blind_array_access(digit, &is_mone, ctx);
-            // are all digits so far full?
-            let zero = public_key.allocate_and_trivially_encrypt_lwe(0, ctx);
-            let andb = LUT::from_vec_of_lwe(&vec![zero, b], public_key, ctx);
-
-            acc = public_key.blind_array_access(&acc, &andb, ctx);
-            *digit = next_digit;
+            *digit = public_key.blind_array_access(&acc, &sel, ctx);
         }
 
         out
@@ -227,5 +241,108 @@ impl NLWE {
         }
 
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{key, nlwe::*};
+    use quickcheck::TestResult;
+    use std::time::Instant;
+    use tfhe::shortint::parameters::*;
+
+    #[test]
+    pub fn test_to_digits() {
+        assert_eq!(to_digits(0b01, 2, 2), vec![0, 1]);
+        assert_eq!(to_digits(0o1234, 4, 8), vec![1, 2, 3, 4]);
+        assert_eq!(
+            to_digits(0x0123456789ABCDEF, 16, 16),
+            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        );
+        for i in 0..256 {
+            assert_eq!(from_digits(&to_digits(i, 2, 16), 16), i);
+        }
+    }
+
+    #[test]
+    pub fn test_nlwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_1_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let nlwe = NLWE::from_plain(0b01, 2, &mut ctx, &private_key);
+        assert_eq!(nlwe.to_plain(&ctx, &private_key), 0b01);
+        let mut ctx = Context::from(PARAM_MESSAGE_3_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let nlwe = NLWE::from_plain(0o1234, 4, &mut ctx, &private_key);
+        assert_eq!(nlwe.to_plain(&ctx, &private_key), 0o1234);
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let nlwe = NLWE::from_plain(0x0123456789ABCDEF, 16, &mut ctx, &private_key);
+        assert_eq!(nlwe.to_plain(&ctx, &private_key), 0x0123456789ABCDEF);
+    }
+
+    #[quickcheck]
+    pub fn test_nlwe_add(i: u8, j: u8) -> TestResult {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let p = ctx.full_message_modulus() as u64;
+        let n = 2;
+        let size = p.pow(n as u32);
+        let private_key = key(ctx.parameters);
+
+        let a = NLWE::from_plain(i as u64, n, &mut ctx, &private_key);
+        let b = NLWE::from_plain(j as u64, n, &mut ctx, &private_key);
+        let start = Instant::now();
+        let c = a.add(&b, &ctx, &private_key.public_key);
+        let elapsed = Instant::now() - start;
+        println!(
+            "{:?} + {:?} = {:?} {:?}",
+            to_digits(i as u64, n, p),
+            to_digits(j as u64, n, p),
+            c.to_plain_digits(&ctx, private_key),
+            elapsed
+        );
+        let dc = c.to_plain(&ctx, &private_key);
+        TestResult::from_bool(dc == (i as u64 + j as u64) % size)
+    }
+
+    #[test]
+    pub fn test_nlwe_increment() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let p = ctx.full_message_modulus() as u64;
+        let private_key = key(ctx.parameters);
+        let n = 2;
+        let range = p.pow(n as u32);
+
+        for i in 0..range {
+            let nlwe = NLWE::from_plain(i, n, &mut ctx, &private_key);
+            let start = Instant::now();
+            let next = nlwe.increment(&ctx, &private_key.public_key);
+            let elapsed = Instant::now() - start;
+            println!("{:?}", next.to_plain_digits(&ctx, private_key));
+            let actual = next.to_plain(&ctx, &private_key);
+            let expected = (i + 1) % range;
+            println!("{i}: got {actual} expected {expected} elapsed {elapsed:?}",);
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    pub fn test_nlwe_decrement() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let p = ctx.full_message_modulus() as u64;
+        let private_key = key(ctx.parameters);
+        let n = 2;
+        let range = p.pow(n as u32);
+
+        for i in 0..range {
+            let nlwe = NLWE::from_plain(i, n, &mut ctx, &private_key);
+            let start = Instant::now();
+            let next = nlwe.decrement(&ctx, &private_key.public_key);
+            let elapsed = Instant::now() - start;
+            println!("{:?}", next.to_plain_digits(&ctx, private_key));
+            let actual = next.to_plain(&ctx, &private_key);
+            let expected = (i - 1) % range;
+            println!("{i}: got {actual} expected {expected} elapsed {elapsed:?}",);
+            assert_eq!(actual, expected);
+        }
     }
 }

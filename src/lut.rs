@@ -1,6 +1,7 @@
 use crate::{
     key,
     nlwe::{from_digits, to_digits, NLWE},
+    packed_lut::PackedMNLUT,
     Context, PrivateKey, PublicKey, LUT,
 };
 use ndarray::{Array, Dimension, IxDyn};
@@ -105,10 +106,10 @@ impl MNLUT {
         };
 
         // Otherwise M at least 2, pack p NLWEs from subspaces into a single MNLUT with m = 1
-        let line = MNLUT {
+        let line = Self {
             nlwes: Array::from_shape_fn(IxDyn(&vec![p as usize; 1]), |i| {
                 // get a lower dimensional MNLUT by fixing the first index digit to i
-                let subspace = MNLUT {
+                let subspace = Self {
                     nlwes: Array::from_shape_fn(
                         IxDyn(&vec![p as usize; self.m() - 1]),
                         |indices| {
@@ -238,7 +239,8 @@ impl MNLUT {
         let p = ctx.full_message_modulus;
         let (m, n) = (self.m(), self.n());
         let private_key = key(ctx.parameters);
-        let mut count = MNLUT::from_plain_trivially(&vec![0; p], 1, m, public_key, ctx);
+        let count = MNLUT::from_plain_trivially(&vec![0; p], 1, m, public_key, ctx);
+        let mut count = PackedMNLUT::from_mnlut(&count, ctx, public_key);
 
         println!("self {:02x?}", self.to_plain(ctx, private_key));
         // count the number of elements in each bucket
@@ -246,13 +248,18 @@ impl MNLUT {
         let start = Instant::now();
         for nlwe in self.nlwes.iter() {
             count.blind_tensor_increment(&NLWE::from(&nlwe[d]), ctx, public_key);
-            println!("{:?}", count.to_plain(ctx, private_key));
+            println!(
+                "{:?} {:?}",
+                count.to_mnlut(ctx, public_key).to_plain(ctx, private_key),
+                Instant::now() - start,
+            );
         }
         println!("count {:?}", Instant::now() - start);
 
-        // compute the prefix sum
+        // unpack count and compute the prefix sum
         println!("prefix sum");
         let start = Instant::now();
+        let mut count = count.to_mnlut(ctx, public_key);
         for i in 1..p {
             let prev = count.at(i as u64 - 1, ctx);
             let idx = IxDyn(&vec![i]);
@@ -263,21 +270,24 @@ impl MNLUT {
 
         // rebuild the sorted LUT
         println!("rebuild LUT");
+        let mut count = PackedMNLUT::from_mnlut(&count, ctx, public_key);
         let start = Instant::now();
         let zeroes = &vec![0; p.pow(self.m() as u32)];
-        let mut result = MNLUT::from_plain_trivially(zeroes, m, n, public_key, ctx);
+        let result = MNLUT::from_plain_trivially(zeroes, m, n, public_key, ctx);
+        let mut result = PackedMNLUT::from_mnlut(&result, ctx, public_key);
         for i in (0..p.pow(m as u32)).rev() {
             let nlwe = self.at(i as u64, ctx);
             let pos = count.blind_tensor_post_decrement(&NLWE::from(&nlwe[d]), ctx, public_key);
-            // let pos = count.blind_post_decrement(&nlwe[d], ctx, public_key);
             result.blind_tensor_add_digitwise_overflow(&pos, &nlwe, ctx, public_key);
             println!(
-                "added {:?} at index {:?}: {:?}",
+                "added {:?} at index {:?}: {:?} (count: {:?})",
                 nlwe.to_plain(ctx, private_key),
                 pos.to_plain(ctx, private_key),
-                result.to_plain(ctx, private_key)
+                result.to_mnlut(ctx, public_key).to_plain(ctx, private_key),
+                count.to_mnlut(ctx, public_key).to_plain(ctx, private_key)
             );
         }
+        let result = result.to_mnlut(ctx, public_key);
         println!("rebuild {:?}", Instant::now() - start);
         println!("{:02x?}", result.to_plain(ctx, private_key));
         result
@@ -290,7 +300,6 @@ impl MNLUT {
             let start = Instant::now();
             sorted = sorted.blind_counting_sort(d, ctx, public_key);
             println!("sortin by digit {d} took {:?}", Instant::now() - start);
-            // sorted.bootstrap(ctx, public_key);
         }
         sorted
     }
@@ -303,66 +312,7 @@ mod tests {
     use super::*;
     use crate::key;
     use itertools::Itertools;
-    use tfhe::shortint::parameters::{
-        PARAM_MESSAGE_1_CARRY_0, PARAM_MESSAGE_2_CARRY_0, PARAM_MESSAGE_3_CARRY_0,
-        PARAM_MESSAGE_4_CARRY_0,
-    };
-
-    #[test]
-    pub fn test_to_digits() {
-        assert_eq!(to_digits(0b01, 2, 2), vec![0, 1]);
-        assert_eq!(to_digits(0o1234, 4, 8), vec![1, 2, 3, 4]);
-        assert_eq!(
-            to_digits(0x0123456789ABCDEF, 16, 16),
-            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-        );
-        for i in 0..256 {
-            assert_eq!(from_digits(&to_digits(i, 2, 16), 16), i);
-        }
-    }
-
-    #[test]
-    pub fn test_nlwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_1_CARRY_0);
-        let private_key = key(ctx.parameters);
-        let nlwe = NLWE::from_plain(0b01, 2, &mut ctx, &private_key);
-        assert_eq!(nlwe.to_plain(&ctx, &private_key), 0b01);
-        let mut ctx = Context::from(PARAM_MESSAGE_3_CARRY_0);
-        let private_key = key(ctx.parameters);
-        let nlwe = NLWE::from_plain(0o1234, 4, &mut ctx, &private_key);
-        assert_eq!(nlwe.to_plain(&ctx, &private_key), 0o1234);
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(ctx.parameters);
-        let nlwe = NLWE::from_plain(0x0123456789ABCDEF, 16, &mut ctx, &private_key);
-        assert_eq!(nlwe.to_plain(&ctx, &private_key), 0x0123456789ABCDEF);
-    }
-
-    #[test]
-    pub fn test_nlwe_add() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let p = ctx.full_message_modulus() as u64;
-        let n = 2;
-        let size = p.pow(n as u32);
-        let private_key = key(ctx.parameters);
-        for i in 0..size {
-            let a = NLWE::from_plain(i, n, &mut ctx, &private_key);
-            for j in 0..size {
-                let b = NLWE::from_plain(j, n, &mut ctx, &private_key);
-                let start = Instant::now();
-                let c = a.add(&b, &ctx, &private_key.public_key);
-                let elapsed = Instant::now() - start;
-                println!(
-                    "{:?} + {:?} = {:?} {:?}",
-                    to_digits(i, n, p),
-                    to_digits(j, n, p),
-                    c.to_plain_digits(&ctx, private_key),
-                    elapsed
-                );
-                let dc = c.to_plain(&ctx, &private_key);
-                assert_eq!(dc, (i + j) % size);
-            }
-        }
-    }
+    use tfhe::shortint::parameters::*;
 
     #[test]
     pub fn test_blind_tensor_access() {
@@ -430,48 +380,6 @@ mod tests {
     }
 
     #[test]
-    pub fn test_nlwe_increment() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let p = ctx.full_message_modulus() as u64;
-        let private_key = key(ctx.parameters);
-        let n = 2;
-        let range = p.pow(n as u32);
-
-        for i in 0..range {
-            let nlwe = NLWE::from_plain(i, n, &mut ctx, &private_key);
-            let start = Instant::now();
-            let next = nlwe.increment(&ctx, &private_key.public_key);
-            let elapsed = Instant::now() - start;
-            println!("{:?}", next.to_plain_digits(&ctx, private_key));
-            let actual = next.to_plain(&ctx, &private_key);
-            let expected = (i + 1) % range;
-            println!("{i}: got {actual} expected {expected} elapsed {elapsed:?}",);
-            assert_eq!(actual, expected);
-        }
-    }
-
-    #[test]
-    pub fn test_nlwe_decrement() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let p = ctx.full_message_modulus() as u64;
-        let private_key = key(ctx.parameters);
-        let n = 2;
-        let range = p.pow(n as u32);
-
-        for i in 0..range {
-            let nlwe = NLWE::from_plain(i, n, &mut ctx, &private_key);
-            let start = Instant::now();
-            let next = nlwe.decrement(&ctx, &private_key.public_key);
-            let elapsed = Instant::now() - start;
-            println!("{:?}", next.to_plain_digits(&ctx, private_key));
-            let actual = next.to_plain(&ctx, &private_key);
-            let expected = (i - 1) % range;
-            println!("{i}: got {actual} expected {expected} elapsed {elapsed:?}",);
-            assert_eq!(actual, expected);
-        }
-    }
-
-    #[test]
     pub fn test_blind_tensor_increment() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let p = ctx.full_message_modulus() as u64;
@@ -497,9 +405,9 @@ mod tests {
 
     #[test]
     pub fn test_blind_radix_sort() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
-        let (m, n) = (1, 1);
+        let (m, n) = (2, 2);
         let size = ctx.full_message_modulus().pow(m as u32) as u64;
         let range = ctx.full_message_modulus().pow(n as u32) as u64;
         let data = Vec::from_iter((0..size as u64).map(|x| x % range).rev());
