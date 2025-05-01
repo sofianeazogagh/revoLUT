@@ -5,7 +5,7 @@ use rayon::vec;
 /// Assuming we work in param4
 use tfhe::core_crypto::{
     algorithms::lwe_ciphertext_add_assign,
-    prelude::{lwe_ciphertext_sub, lwe_ciphertext_sub_assign},
+    prelude::{blind_rotate_assign, lwe_ciphertext_sub, lwe_ciphertext_sub_assign},
 };
 
 use crate::{key, Context, PrivateKey, PublicKey, LUT, LWE};
@@ -366,7 +366,7 @@ impl PublicKey {
         ByteLWE { lo, hi }
     }
 
-    /// This oddly named function increments an encrypted bit to a ByteLWE
+    /// This oddly named function increments an encrypted bit to a ByteLWE or does nothing
     pub fn byte_lwe_maybe_inc(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
         let vec_inc: Vec<u64> = (0..ctx.full_message_modulus as u64).collect();
         let lut_id = LUT::from_vec_trivially(&vec_inc, ctx);
@@ -380,6 +380,46 @@ impl PublicKey {
         let selector = self.blind_array_access(&a.lo, &lut_last, ctx);
         let lut_select = LUT::from_vec_of_lwe(&vec![a.hi.clone(), t], self, ctx);
         let hi = self.blind_array_access(&selector, &lut_select, ctx);
+        ByteLWE { lo, hi }
+    }
+
+    pub fn byte_lwe_maybe_inc_or_dec(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
+        let p = ctx.full_message_modulus as u64;
+
+        // First round of switch case
+        // Identity luts
+        let lut_id = LUT::from_vec_trivially(&(0..p).collect::<Vec<_>>(), ctx);
+        // Increment lut
+        let lut_inc =
+            LUT::from_vec_trivially(&(0..p).map(|x| (x + 1) % p).collect::<Vec<_>>(), ctx);
+        // Decrement lut
+        let lut_dec =
+            LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx);
+
+        let lo = self.switch_case3(
+            &a.lo,
+            &b,
+            &vec![lut_id.clone(), lut_inc.clone(), lut_dec.clone()],
+            ctx,
+        );
+
+        // Second round of switch case
+        // Instanciate the luts
+        let zeros = vec![0; p as usize];
+        let mut vec_last = zeros.clone();
+        vec_last[p as usize - 1] = 1;
+        let mut vec_first = zeros.clone();
+        vec_first[0] = 2;
+
+        let lut_z = LUT::from_vec_trivially(&zeros, ctx); // [0,..,0]
+        let lut_last = LUT::from_vec_trivially(&vec_last, ctx); // [0,..,0,1]
+        let lut_first = LUT::from_vec_trivially(&vec_first, ctx); // [2,0,..,0]
+
+        let s = self.switch_case3(&a.lo, &b, &vec![lut_z, lut_last, lut_first], ctx);
+
+        // Third round of switch case
+        let hi = self.switch_case3(&a.hi, &s, &vec![lut_id, lut_inc, lut_dec], ctx);
+
         ByteLWE { lo, hi }
     }
 
@@ -787,5 +827,30 @@ mod test {
         // assert_eq!(actual, 0x11);
 
         TestResult::from_bool(actual == a + b as u8)
+    }
+
+    #[test]
+    fn test_byte_lwe_maybe_inc_or_dec() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let a = 0x20;
+        let b = 0x02;
+
+        let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
+        let enc_b = private_key.allocate_and_encrypt_lwe(b, &mut ctx);
+
+        let start = Instant::now();
+        let c = public_key.byte_lwe_maybe_inc_or_dec(&enc_a, &enc_b, &ctx);
+
+        let actual = c.to_byte(&ctx, private_key);
+        println!(
+            "elapsed {:?}, a: {:02X}, b: {:02X}, actual: {:02X}",
+            Instant::now() - start,
+            a,
+            b as u64,
+            actual
+        );
     }
 }

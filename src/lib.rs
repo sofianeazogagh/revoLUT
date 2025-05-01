@@ -1749,6 +1749,18 @@ impl PublicKey {
         let maj = self.blind_argmax(&count, ctx);
         maj
     }
+
+    /// This function select one of the 3 luts based on the value of s1 then use the result to select one of the 3 lwe based on the value of s2
+    /// s2 needs to encrypt 0, 1 or 2
+    pub fn switch_case3(&self, s1: &LWE, s2: &LWE, luts: &[LUT], ctx: &Context) -> LWE {
+        let a = self.blind_array_access(&s1, &luts[0], ctx);
+        let b = self.blind_array_access(&s1, &luts[1], ctx);
+        let c = self.blind_array_access(&s1, &luts[2], ctx);
+
+        let acc = LUT::from_vec_of_lwe(&vec![a, b, c], self, ctx);
+        let res = self.blind_array_access(s2, &acc, ctx);
+        res
+    }
 }
 
 #[derive(Clone)]
@@ -3453,5 +3465,37 @@ mod test {
         let actual = private_key.decrypt_lwe(&maj, &ctx);
         println!("actual: {}", actual);
         assert_eq!(actual, 2);
+    }
+
+    #[test]
+    fn test_switch_case3() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+        let p = ctx.full_message_modulus() as u64;
+
+        // Identity luts
+        let lut1 = LUT::from_vec(&(0..p).collect::<Vec<_>>(), &private_key, &mut ctx);
+        // Increment lut
+        let lut2 = LUT::from_vec(
+            &(0..p).map(|x| (x + 1) % p).collect::<Vec<_>>(),
+            &private_key,
+            &mut ctx,
+        );
+        // Decrement lut
+        let lut3 = LUT::from_vec(
+            &(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(),
+            &private_key,
+            &mut ctx,
+        );
+
+        // Selectors
+        let s1 = private_key.allocate_and_encrypt_lwe(p - 1, &mut ctx);
+        let s2 = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
+
+        let res = public_key.switch_case3(&s1, &s2, &vec![lut1, lut2, lut3], &ctx);
+        let actual = private_key.decrypt_lwe(&res, &ctx);
+        println!("actual: {}", actual);
+        // assert_eq!(actual, 2);
     }
 }
