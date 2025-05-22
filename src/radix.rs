@@ -519,7 +519,7 @@ impl PublicKey {
         self.blind_array_access(&t, &lut_or, ctx)
     }
 
-    pub fn blind_argmax_byte_lwe(&self, blwes: &[ByteLWE], ctx: &Context) -> ByteLWE {
+    pub fn blind_argmax_blwe_blwe(&self, blwes: &[ByteLWE], ctx: &Context) -> ByteLWE {
         // initialize min to the first element, and argmin to its index
         let mut max = blwes[0].clone();
         let mut argmax = ByteLWE::from_byte_trivially(0x00, ctx, self);
@@ -549,6 +549,39 @@ impl PublicKey {
             argmax = ByteLWE {
                 hi: argmax_hi,
                 lo: argmax_lo,
+            };
+        }
+
+        argmax
+    }
+
+    pub fn blind_argmax_blwe_lwe(&self, blwes: &[ByteLWE], ctx: &Context) -> LWE {
+        // initialize min to the first element, and argmin to its index
+        let mut max = blwes[0].clone();
+        let mut argmax = self.allocate_and_trivially_encrypt_lwe(0u64, ctx);
+
+        // loop and search for min and armgin
+        for i in 1..blwes.len() {
+            let e = blwes[i].clone();
+            // blind lt mv
+            let b = self.blind_gt_byte_lwe(&max, &e, ctx);
+
+            // let arg_e = ByteLWE::from_byte_trivially(i as u8, ctx, self);
+            let arg_e = self.allocate_and_trivially_encrypt_lwe(i as u64, ctx);
+            let indices = LUT::from_vec_of_lwe(&[arg_e, argmax], self, ctx);
+            let hi_lut_messages = LUT::from_vec_of_lwe(&[e.hi, max.hi], self, ctx);
+            let lo_lut_messages = LUT::from_vec_of_lwe(&[e.lo, max.lo], self, ctx);
+
+            // let argmax_hi = self.blind_array_access(&b, &hi_lut_indices, ctx);
+            // let argmax_lo = self.blind_array_access(&b, &lo_lut_indices, ctx);
+            argmax = self.blind_array_access(&b, &indices, ctx);
+
+            let max_hi = self.blind_array_access(&b, &hi_lut_messages, ctx);
+            let max_lo = self.blind_array_access(&b, &lo_lut_messages, ctx);
+
+            max = ByteLWE {
+                hi: max_hi,
+                lo: max_lo,
             };
         }
 
@@ -839,7 +872,7 @@ mod test {
     }
 
     #[test]
-    fn test_blind_argmax_byte_lwe() {
+    fn test_blind_argmax_blwe_blwe() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
@@ -852,7 +885,7 @@ mod test {
             .collect::<Vec<_>>();
 
         let start = Instant::now();
-        let argmax = public_key.blind_argmax_byte_lwe(&blwes, &ctx);
+        let argmax = public_key.blind_argmax_blwe_blwe(&blwes, &ctx);
         println!("total time elapsed: {:?}", Instant::now() - start);
 
         let actual = argmax.to_byte(&ctx, private_key);
@@ -860,6 +893,30 @@ mod test {
         let expected_max = items.iter().max().unwrap();
         let expected = items.iter().position(|i| *i == *expected_max).unwrap();
         assert_eq!(actual, expected as u8);
+    }
+
+    #[test]
+    fn test_blind_argmax_blwe_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let items: Vec<u8> = (0..16).map(|_| rand::random::<u8>()).collect();
+
+        let blwes = items
+            .iter()
+            .map(|i| ByteLWE::from_byte(*i, &mut ctx, private_key))
+            .collect::<Vec<_>>();
+
+        let start = Instant::now();
+        let argmax = public_key.blind_argmax_blwe_lwe(&blwes, &ctx);
+        println!("total time elapsed: {:?}", Instant::now() - start);
+
+        let actual = private_key.decrypt_lwe(&argmax, &ctx);
+
+        let expected_max = items.iter().max().unwrap();
+        let expected = items.iter().position(|i| *i == *expected_max).unwrap();
+        assert_eq!(actual, expected as u64);
     }
 
     #[quickcheck]
