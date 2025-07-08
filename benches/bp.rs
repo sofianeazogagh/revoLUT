@@ -20,8 +20,8 @@ fn bench_bp(c: &mut Criterion, param: ClassicPBSParameters) {
             },
             |(lut, permutation, ctx)| {
                 private_key.public_key.blind_permutation(
-                    black_box(lut),
-                    black_box(permutation),
+                    black_box(&lut),
+                    black_box(&permutation),
                     &ctx,
                 )
             },

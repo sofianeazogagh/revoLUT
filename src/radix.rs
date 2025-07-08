@@ -1,11 +1,17 @@
 use std::time::Instant;
 
+#[allow(unused)]
+use rayon::vec;
 /// Assuming we work in param4
-use tfhe::core_crypto::algorithms::lwe_ciphertext_add_assign;
+use tfhe::core_crypto::{
+    algorithms::lwe_ciphertext_add_assign,
+    prelude::{blind_rotate_assign, lwe_ciphertext_sub, lwe_ciphertext_sub_assign},
+};
 
 use crate::{key, Context, PrivateKey, PublicKey, LUT, LWE};
 
 /// A byte represented by two lwe ciphertexts
+#[derive(Clone)]
 pub struct ByteLWE {
     pub lo: LWE,
     pub hi: LWE,
@@ -32,12 +38,14 @@ impl ByteLWE {
 }
 
 /// Structure indexing a byte by a nybble
+#[derive(Clone)]
 pub struct NyblByteLUT {
     pub lo: LUT,
     pub hi: LUT,
 }
 
 impl NyblByteLUT {
+    #[allow(dead_code)]
     pub fn from_bytes(input: &[u8; 16], private_key: &PrivateKey, ctx: &mut Context) -> Self {
         let los = Vec::from_iter((0..16).map(|i| ((input[i] >> 0) & 0b1111) as u64));
         let his = Vec::from_iter((0..16).map(|i| ((input[i] >> 4) & 0b1111) as u64));
@@ -54,6 +62,29 @@ impl NyblByteLUT {
             lo: LUT::from_vec_trivially(&los, ctx),
             hi: LUT::from_vec_trivially(&his, ctx),
         }
+    }
+
+    pub fn from_vec_of_blwes(blwes: &[ByteLWE], public_key: &PublicKey, ctx: &Context) -> Self {
+        let lo = LUT::from_vec_of_lwe(
+            &Vec::from_iter(blwes.iter().map(|blwe| blwe.lo.clone())),
+            public_key,
+            ctx,
+        );
+        let hi = LUT::from_vec_of_lwe(
+            &Vec::from_iter(blwes.iter().map(|blwe| blwe.hi.clone())),
+            public_key,
+            ctx,
+        );
+        Self { lo, hi }
+    }
+
+    pub fn to_many_blwes(&self, public_key: &PublicKey, ctx: &Context) -> Vec<ByteLWE> {
+        let los = self.lo.to_many_lwe(public_key, ctx);
+        let his = self.hi.to_many_lwe(public_key, ctx);
+        los.into_iter()
+            .zip(his.into_iter())
+            .map(|(lo, hi)| ByteLWE { lo, hi })
+            .collect()
     }
 
     pub fn at(&self, index: u8, ctx: &Context, public_key: &PublicKey) -> ByteLWE {
@@ -92,16 +123,48 @@ impl NyblByteLUT {
         self.blind_array_set(index, &new_value, ctx, public_key);
     }
 
+    /// add encrypted bit value at encrypted nyble index
+    pub fn blind_array_maybe_inc(
+        &mut self,
+        index: &LWE,
+        b: &LWE,
+        ctx: &Context,
+        public_key: &PublicKey,
+    ) {
+        // 2 br
+        let current = self.blind_array_access(index, ctx, public_key);
+        // 1 bma (17 br)
+        let new_value = public_key.byte_lwe_maybe_inc(&current, &b, ctx);
+        // 4 br
+        self.blind_array_set(index, &new_value, ctx, public_key);
+    }
+
+    /// increment, decrement or do nothing to encrypted bytevalue at encrypted nyble index
+    pub fn blind_array_maybe_inc_or_dec(
+        &mut self,
+        index: &LWE,
+        b: &LWE,
+        ctx: &Context,
+        public_key: &PublicKey,
+    ) {
+        let current = self.blind_array_access(index, ctx, public_key);
+        let new_value = public_key.byte_lwe_maybe_inc_or_dec(&current, &b, ctx);
+        self.blind_array_set(index, &new_value, ctx, public_key);
+    }
+
     /// increment encrypted byte value at encrypted nybl index
     pub fn blind_array_inc(&mut self, index: &LWE, ctx: &Context, public_key: &PublicKey) {
         // 2 br
         let lo = public_key.blind_array_access(&index, &self.lo, ctx);
+        let successor = LUT::from_function(|x| (x + 1) % ctx.full_message_modulus as u64, ctx);
+
+        let mut successor_lo = public_key.blind_array_access(&lo, &successor, ctx);
+
         let lut = LUT::from_function(|x| if x == 15 { 1 } else { 0 }, ctx);
         let carry = public_key.blind_array_access(&lo, &lut, ctx);
 
-        // 2 br
-        let one = public_key.allocate_and_trivially_encrypt_lwe(1, ctx);
-        public_key.blind_array_increment(&mut self.lo, &index, &one, ctx);
+        lwe_ciphertext_sub_assign(&mut successor_lo, &lo);
+        public_key.blind_array_increment(&mut self.lo, &index, &successor_lo, ctx);
         public_key.blind_array_increment(&mut self.hi, &index, &carry, ctx);
     }
 
@@ -134,7 +197,31 @@ impl NyblByteLUT {
         public_key.blind_array_set(&mut self.hi, &index, &value.hi, ctx);
     }
 
-    fn print(&self, private_key: &PrivateKey, ctx: &Context) {
+    pub fn to_bytes(
+        &self,
+        public_key: &PublicKey,
+        private_key: &PrivateKey,
+        ctx: &Context,
+    ) -> [u8; 16] {
+        let mut result = [0; 16];
+        for i in 0..16 {
+            let blwe = self.at(i as u8, ctx, public_key);
+            result[i] = blwe.to_byte(ctx, private_key);
+        }
+        result
+    }
+
+    pub fn print_bytes(&self, public_key: &PublicKey, private_key: &PrivateKey, ctx: &Context) {
+        let mut result = vec![];
+        for i in 0..16 {
+            let blwe = self.at(i, ctx, public_key);
+            let byte = blwe.to_byte(ctx, private_key);
+            result.push(byte);
+        }
+        println!("{:02X?}", result);
+    }
+
+    pub fn print(&self, private_key: &PrivateKey, ctx: &Context) {
         self.lo.print(private_key, ctx);
         self.hi.print(private_key, ctx);
     }
@@ -292,6 +379,215 @@ impl PublicKey {
         ByteLWE { lo, hi }
     }
 
+    /// This oddly named function increments an encrypted bit to a ByteLWE or does nothing
+    pub fn byte_lwe_maybe_inc(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
+        let vec_inc: Vec<u64> = (0..ctx.full_message_modulus as u64).collect();
+        let lut_id = LUT::from_vec_trivially(&vec_inc, ctx);
+        let lut_maybe_inc = self.blind_rotation(&b, &lut_id, ctx);
+        let lo = self.blind_array_access(&a.lo, &lut_maybe_inc, ctx);
+        let t = self.blind_array_access(&a.hi, &lut_maybe_inc, ctx);
+
+        let mut vec_zero = vec![0; ctx.full_message_modulus];
+        vec_zero[ctx.full_message_modulus - 1] = 1;
+        let lut_last = LUT::from_vec_trivially(&vec_zero, ctx);
+        let selector = self.blind_array_access(&a.lo, &lut_last, ctx);
+        let lut_select = LUT::from_vec_of_lwe(&vec![a.hi.clone(), t], self, ctx);
+        let hi = self.blind_array_access(&selector, &lut_select, ctx);
+        ByteLWE { lo, hi }
+    }
+
+    pub fn byte_lwe_maybe_inc_or_dec(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
+        let p = ctx.full_message_modulus as u64;
+
+        // First round of switch case
+        // Identity luts
+        let lut_id = LUT::from_vec_trivially(&(0..p).collect::<Vec<_>>(), ctx);
+        // Increment lut
+        let lut_inc =
+            LUT::from_vec_trivially(&(0..p).map(|x| (x + 1) % p).collect::<Vec<_>>(), ctx);
+        // Decrement lut
+        let lut_dec =
+            LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx);
+
+        let lo = self.switch_case3(
+            &a.lo,
+            &b,
+            &vec![lut_id.clone(), lut_inc.clone(), lut_dec.clone()],
+            ctx,
+        );
+
+        // Second round of switch case
+        // Instanciate the luts
+        let zeros = vec![0; p as usize];
+        let mut vec_last = zeros.clone();
+        vec_last[p as usize - 1] = 1;
+        let mut vec_first = zeros.clone();
+        vec_first[0] = 2;
+
+        let lut_z = LUT::from_vec_trivially(&zeros, ctx); // [0,..,0]
+        let lut_last = LUT::from_vec_trivially(&vec_last, ctx); // [0,..,0,1]
+        let lut_first = LUT::from_vec_trivially(&vec_first, ctx); // [2,0,..,0]
+
+        let s = self.switch_case3(&a.lo, &b, &vec![lut_z, lut_last, lut_first], ctx);
+
+        // Third round of switch case
+        let hi = self.switch_case3(&a.hi, &s, &vec![lut_id, lut_inc, lut_dec], ctx);
+
+        ByteLWE { lo, hi }
+    }
+
+    // FIXME : this is not working
+    pub fn dirty_byte_lwe_maybe_inc_or_dec(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
+        let p = ctx.full_message_modulus as u64;
+
+        // First round of switch case
+        // Identity luts
+        let lut_id = LUT::from_vec_trivially(&(0..p).collect::<Vec<_>>(), ctx);
+        // Increment lut
+        let lut_inc =
+            LUT::from_vec_trivially(&(0..p).map(|x| (x + 1) % p).collect::<Vec<_>>(), ctx);
+        // Decrement lut
+        let lut_dec =
+            LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx);
+
+        let mut lo = a.lo.clone();
+        lwe_ciphertext_add_assign(&mut lo, &b);
+
+        // Second round of switch case
+        // Instanciate the luts
+        let zeros = vec![0; p as usize];
+        let mut vec_last = zeros.clone();
+        vec_last[p as usize - 1] = 1;
+        let mut vec_first = zeros.clone();
+        vec_first[0] = p - 1;
+
+        let lut_z = LUT::from_vec_trivially(&zeros, ctx); // [0,..,0]
+        let lut_last = LUT::from_vec_trivially(&vec_last, ctx); // [0,..,0,1]
+        let lut_first = LUT::from_vec_trivially(&vec_first, ctx); // [F,0,..,0]
+
+        let mut luts = vec![lut_z.clone(), lut_last.clone()];
+        luts.extend(vec![lut_z.clone(); (p - 3) as usize]);
+        luts.push(lut_first.clone());
+        assert_eq!(luts.len(), p as usize);
+        let s = self.switch_case3(&a.lo, &b, &luts, ctx);
+
+        // Third round of switch case
+        let mut luts = vec![lut_id.clone(), lut_inc.clone()];
+        luts.extend(vec![lut_z.clone(); (p - 3) as usize]);
+        luts.push(lut_dec.clone());
+        assert_eq!(luts.len(), p as usize);
+        let hi = self.switch_case3(&a.hi, &s, &luts, ctx);
+
+        ByteLWE { lo, hi }
+    }
+
+    pub fn blind_lt_byte_lwe(&self, a: &ByteLWE, b: &ByteLWE, ctx: &Context) -> LWE {
+        let c1 = self.blind_lt_bma_mv(&a.hi, &b.hi, ctx);
+        let c2 = self.blind_lt_bma_mv(&a.lo, &b.lo, ctx);
+        let eq = self.blind_eq_bma_mv(&a.hi, &b.hi, ctx);
+
+        // eq and c2
+        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let lut_and = LUT::from_vec_of_lwe(&[zero, c2], self, ctx);
+        let mut t = self.blind_array_access(&eq, &lut_and, ctx);
+
+        // c1 or (eq and c2)
+        let mut or = vec![1u64; ctx.full_message_modulus];
+        or[0] = 0;
+        let lut_or = LUT::from_vec_trivially(&or, ctx);
+        lwe_ciphertext_add_assign(&mut t, &c1);
+
+        self.blind_array_access(&t, &lut_or, ctx)
+    }
+
+    pub fn blind_gt_byte_lwe(&self, a: &ByteLWE, b: &ByteLWE, ctx: &Context) -> LWE {
+        let c1 = self.blind_gt_bma_mv(&a.hi, &b.hi, ctx);
+        let c2 = self.blind_gt_bma_mv(&a.lo, &b.lo, ctx);
+        let eq = self.blind_eq_bma_mv(&a.hi, &b.hi, ctx);
+
+        // eq and c2
+        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let lut_and = LUT::from_vec_of_lwe(&[zero, c2], self, ctx);
+        let mut t = self.blind_array_access(&eq, &lut_and, ctx);
+
+        // c1 or (eq and c2)
+        let mut or = vec![1u64; ctx.full_message_modulus];
+        or[0] = 0;
+        let lut_or = LUT::from_vec_trivially(&or, ctx);
+        lwe_ciphertext_add_assign(&mut t, &c1);
+
+        self.blind_array_access(&t, &lut_or, ctx)
+    }
+
+    pub fn blind_argmax_blwe_blwe(&self, blwes: &[ByteLWE], ctx: &Context) -> ByteLWE {
+        // initialize min to the first element, and argmin to its index
+        let mut max = blwes[0].clone();
+        let mut argmax = ByteLWE::from_byte_trivially(0x00, ctx, self);
+
+        // loop and search for min and armgin
+        for i in 1..blwes.len() {
+            let e = blwes[i].clone();
+            // blind lt mv
+            let b = self.blind_gt_byte_lwe(&max, &e, ctx);
+
+            let arg_e = ByteLWE::from_byte_trivially(i as u8, ctx, self);
+            let hi_lut_indices = LUT::from_vec_of_lwe(&[arg_e.hi, argmax.hi], self, ctx);
+            let lo_lut_indices = LUT::from_vec_of_lwe(&[arg_e.lo, argmax.lo], self, ctx);
+            let hi_lut_messages = LUT::from_vec_of_lwe(&[e.hi, max.hi], self, ctx);
+            let lo_lut_messages = LUT::from_vec_of_lwe(&[e.lo, max.lo], self, ctx);
+
+            let argmax_hi = self.blind_array_access(&b, &hi_lut_indices, ctx);
+            let argmax_lo = self.blind_array_access(&b, &lo_lut_indices, ctx);
+
+            let max_hi = self.blind_array_access(&b, &hi_lut_messages, ctx);
+            let max_lo = self.blind_array_access(&b, &lo_lut_messages, ctx);
+
+            max = ByteLWE {
+                hi: max_hi,
+                lo: max_lo,
+            };
+            argmax = ByteLWE {
+                hi: argmax_hi,
+                lo: argmax_lo,
+            };
+        }
+
+        argmax
+    }
+
+    pub fn blind_argmax_blwe_lwe(&self, blwes: &[ByteLWE], ctx: &Context) -> LWE {
+        // initialize min to the first element, and argmin to its index
+        let mut max = blwes[0].clone();
+        let mut argmax = self.allocate_and_trivially_encrypt_lwe(0u64, ctx);
+
+        // loop and search for min and armgin
+        for i in 1..blwes.len() {
+            let e = blwes[i].clone();
+            // blind lt mv
+            let b = self.blind_gt_byte_lwe(&max, &e, ctx);
+
+            // let arg_e = ByteLWE::from_byte_trivially(i as u8, ctx, self);
+            let arg_e = self.allocate_and_trivially_encrypt_lwe(i as u64, ctx);
+            let indices = LUT::from_vec_of_lwe(&[arg_e, argmax], self, ctx);
+            let hi_lut_messages = LUT::from_vec_of_lwe(&[e.hi, max.hi], self, ctx);
+            let lo_lut_messages = LUT::from_vec_of_lwe(&[e.lo, max.lo], self, ctx);
+
+            // let argmax_hi = self.blind_array_access(&b, &hi_lut_indices, ctx);
+            // let argmax_lo = self.blind_array_access(&b, &lo_lut_indices, ctx);
+            argmax = self.blind_array_access(&b, &indices, ctx);
+
+            let max_hi = self.blind_array_access(&b, &hi_lut_messages, ctx);
+            let max_lo = self.blind_array_access(&b, &lo_lut_messages, ctx);
+
+            max = ByteLWE {
+                hi: max_hi,
+                lo: max_lo,
+            };
+        }
+
+        argmax
+    }
+
     pub fn keyed_blind_counting_sort(
         &self,
         bblut: &ByteByteLUT,
@@ -422,12 +718,16 @@ mod test {
         let public_key = &private_key.public_key;
 
         let mut bblut = ByteByteLUT::from_bytes(&[0; 256], private_key, &mut ctx);
-        let index = ByteLWE::from_byte(0, &mut ctx, private_key);
+        println!("bblut before add:");
+        bblut.print(public_key, private_key, &ctx);
+        let index = ByteLWE::from_byte(5, &mut ctx, private_key);
         let value = ByteLWE::from_byte(1, &mut ctx, private_key);
 
         let start = Instant::now();
         bblut.blind_array_add(&index, &value, &ctx, public_key);
         println!("elapsed: {:?}", Instant::now() - start);
+        println!("bblut after add:");
+        bblut.print(public_key, private_key, &ctx);
 
         let ct = bblut.blind_array_access(&index, &ctx, public_key);
         let actual = ct.to_byte(&ctx, private_key);
@@ -528,5 +828,159 @@ mod test {
         let start = Instant::now();
         public_key.keyed_blind_counting_sort(&bblut, |blwe| blwe.hi.clone(), &ctx);
         println!("total time elapsed: {:?}", Instant::now() - start);
+    }
+
+    #[test]
+    fn test_blind_lt_byte_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let a = 0x12;
+        let b = 0x12;
+
+        let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
+        let enc_b = ByteLWE::from_byte(b, &mut ctx, private_key);
+
+        let start = Instant::now();
+        let c = public_key.blind_lt_byte_lwe(&enc_a, &enc_b, &ctx);
+        println!("elapsed {:?}", Instant::now() - start);
+
+        let actual = private_key.decrypt_lwe(&c, &ctx);
+        assert_eq!(actual, (a < b) as u64);
+    }
+
+    #[test]
+    fn test_blind_gt_byte_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let a = 0x20;
+        let b = 0x12;
+
+        let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
+        let enc_b = ByteLWE::from_byte(b, &mut ctx, private_key);
+
+        let start = Instant::now();
+        let c = public_key.blind_gt_byte_lwe(&enc_a, &enc_b, &ctx);
+        println!("elapsed {:?}", Instant::now() - start);
+
+        let actual = private_key.decrypt_lwe(&c, &ctx);
+        assert_eq!(actual, (a > b) as u64);
+    }
+
+    #[test]
+    fn test_blind_argmax_blwe_blwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let items: Vec<u8> = (0..16).map(|_| rand::random::<u8>()).collect();
+
+        let blwes = items
+            .iter()
+            .map(|i| ByteLWE::from_byte(*i, &mut ctx, private_key))
+            .collect::<Vec<_>>();
+
+        let start = Instant::now();
+        let argmax = public_key.blind_argmax_blwe_blwe(&blwes, &ctx);
+        println!("total time elapsed: {:?}", Instant::now() - start);
+
+        let actual = argmax.to_byte(&ctx, private_key);
+
+        let expected_max = items.iter().max().unwrap();
+        let expected = items.iter().position(|i| *i == *expected_max).unwrap();
+        assert_eq!(actual, expected as u8);
+    }
+
+    #[test]
+    fn test_blind_argmax_blwe_lwe() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let items: Vec<u8> = (0..16).map(|_| rand::random::<u8>()).collect();
+
+        let blwes = items
+            .iter()
+            .map(|i| ByteLWE::from_byte(*i, &mut ctx, private_key))
+            .collect::<Vec<_>>();
+
+        let start = Instant::now();
+        let argmax = public_key.blind_argmax_blwe_lwe(&blwes, &ctx);
+        println!("total time elapsed: {:?}", Instant::now() - start);
+
+        let actual = private_key.decrypt_lwe(&argmax, &ctx);
+
+        let expected_max = items.iter().max().unwrap();
+        let expected = items.iter().position(|i| *i == *expected_max).unwrap();
+        assert_eq!(actual, expected as u64);
+    }
+
+    #[quickcheck]
+    fn test_byte_lwe_maybe_inc_qc(a: u8, b: bool) -> TestResult {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
+        let enc_b = private_key.allocate_and_encrypt_lwe(b as u64, &mut ctx);
+
+        let start = Instant::now();
+        let c = public_key.byte_lwe_maybe_inc(&enc_a, &enc_b, &ctx);
+
+        let actual = c.to_byte(&ctx, private_key);
+        println!(
+            "elapsed {:?}, a: {:02X}, b: {:02X}, actual: {:02X}",
+            Instant::now() - start,
+            a,
+            b as u64,
+            actual
+        );
+        // assert_eq!(actual, 0x11);
+
+        TestResult::from_bool(actual == a + b as u8)
+    }
+
+    #[test]
+    fn test_byte_lwe_maybe_inc_or_dec() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let a = 0x20;
+        let b = 0x02;
+
+        let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
+        let enc_b = private_key.allocate_and_encrypt_lwe(b, &mut ctx);
+
+        let start = Instant::now();
+        let c = public_key.byte_lwe_maybe_inc_or_dec(&enc_a, &enc_b, &ctx);
+
+        let actual = c.to_byte(&ctx, private_key);
+        println!(
+            "elapsed {:?}, a: {:02X}, b: {:02X}, actual: {:02X}",
+            Instant::now() - start,
+            a,
+            b as u64,
+            actual
+        );
+    }
+
+    #[test]
+    fn test_dirty_byte_lwe_maybe_inc_or_dec() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let a = 0x20;
+        let b = 0x0F;
+
+        let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
+        let enc_b = private_key.allocate_and_encrypt_lwe(b, &mut ctx);
+
+        let c = public_key.dirty_byte_lwe_maybe_inc_or_dec(&enc_a, &enc_b, &ctx);
+        println!("c: {:02X}", c.to_byte(&ctx, private_key));
     }
 }

@@ -44,7 +44,7 @@ impl crate::PublicKey {
             }
         }
 
-        self.blind_permutation(lut, permutation, ctx)
+        self.blind_permutation(&lut, &permutation, ctx)
     }
 
     /// given a sparse but ordered lut, returns a permutation that compacts non-null values to the left
@@ -78,11 +78,11 @@ impl crate::PublicKey {
 
         // read the lut as a permutation, and apply it to itself
         let permutation = Vec::from_iter((0..n).map(|i| self.lut_extract(&lut, i, &ctx)));
-        let permuted_lut = self.blind_permutation(lut, permutation, ctx);
+        let permuted_lut = self.blind_permutation(&lut, &permutation, ctx);
 
         // compacts non-null values to the left
         let second_permutation = self.compute_compact_permutation(&permuted_lut, ctx);
-        self.blind_permutation(permuted_lut, second_permutation, ctx)
+        self.blind_permutation(&permuted_lut, &second_permutation, ctx)
     }
 
     pub fn blind_counting_sort(&self, lut: &LUT, ctx: &Context) -> LUT {
@@ -275,11 +275,11 @@ mod tests {
         let elapsed = Instant::now() - begin;
         println!("run ({:?})", elapsed);
 
-        let expected_array = vec![0, 0, 0, 0, 1, 1, 2, 3];
+        let _expected_array = vec![0, 0, 0, 0, 1, 1, 2, 3];
         for i in 0..array.len() {
             let lwe = public_key.lut_extract(&sorted_lut, i, &ctx);
-            let actual = private_key.decrypt_lwe(&lwe, &ctx);
-            // assert_eq!(actual, expected_array[i]);
+            let _actual = private_key.decrypt_lwe(&lwe, &ctx);
+            // assert_eq!(_actual, _expected_array[i]);
         }
         // }
     }
