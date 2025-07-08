@@ -126,7 +126,13 @@ impl MNLUT {
             }),
         };
 
-        line.blind_tensor_access(rest, ctx, public_key)
+        line.blind_tensor_access(
+            &NLWE {
+                digits: vec![index.digits[0].clone()],
+            },
+            ctx,
+            public_key,
+        )
     }
 
     /// Write a n-digit value to the LUT at index given by a m-digit value (Overwriting previous value)

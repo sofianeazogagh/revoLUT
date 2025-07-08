@@ -2,7 +2,6 @@ use std::time::Instant;
 
 use crate::{lut::MNLUT, nlwe::NLWE, Context, PublicKey, LUT};
 use ndarray::{Array, Dimension, IxDyn, Zip};
-use rayon::iter::IntoParallelRefIterator;
 use tfhe::core_crypto::{commons::utils::ZipChecked, prelude::glwe_ciphertext_add_assign};
 
 /// Pre-packed array of LUT ciphertexts holding p^M values mod p^N
@@ -82,9 +81,9 @@ impl PackedMNLUT {
         let spaces = Array::from_shape_fn(IxDyn(&vec![p as usize; 1]), |i| {
             // get a lower dimensional MNLUT by fixing the first index digit to i
             Self {
-                luts: Array::from_shape_fn(IxDyn(&vec![p as usize; self.m() - 1]), |indices| {
+                luts: Array::from_shape_fn(IxDyn(&vec![p as usize; self.m() - 2]), |indices| {
                     let mut idx = vec![i[0]];
-                    idx.extend_from_slice(&Vec::from_iter((0..self.m() - 1).map(|j| indices[j])));
+                    idx.extend_from_slice(&Vec::from_iter((0..self.m() - 2).map(|j| indices[j])));
                     self.luts[IxDyn(&idx)].clone()
                 }),
             }
@@ -97,7 +96,13 @@ impl PackedMNLUT {
         let line = MNLUT { nlwes };
 
         let line = Self::from_mnlut(&line, ctx, public_key);
-        line.blind_tensor_access(rest, ctx, public_key)
+        line.blind_tensor_access(
+            &NLWE {
+                digits: vec![index.digits[0].clone()],
+            },
+            ctx,
+            public_key,
+        )
     }
 
     pub fn blind_tensor_update<F: Fn(&NLWE) -> NLWE>(
