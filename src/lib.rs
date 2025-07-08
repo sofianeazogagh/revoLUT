@@ -387,7 +387,7 @@ impl PrivateKey {
         println!("{:?}", Instant::now() - start);
 
         println!("----- Keys generated -----");
-// 
+        //
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
@@ -1190,41 +1190,6 @@ impl PublicKey {
             let x = self.lut_extract(&column_lut, i, ctx);
             self.blind_array_increment(lut, &column, &x, ctx);
         }
-    }
-
-    /// PIR-like construction to access a matrix element blindly, returns Enc(matrix[x][y])
-    /// time: 2BR + pKS
-    pub fn blind_matrix_access_clear(
-        &self,
-        matrix: &Vec<Vec<u64>>,
-        x: &LWE,
-        y: &LWE,
-        ctx: &Context,
-    ) -> LWE {
-        let p = ctx.full_message_modulus;
-        let mut lut = LUT::from_vec_trivially(&vec![1], ctx);
-        self.blind_rotation_assign(&self.neg_lwe(&x, &ctx), &mut lut, ctx);
-        let onehot = lut.to_many_lwe(&self, ctx);
-        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
-        let l = matrix
-            .iter()
-            .enumerate()
-            .map(|(i, line)| {
-                let xi = onehot[i].clone();
-                Vec::from_iter(line.iter().map(|elt| {
-                    let mut output = xi.clone();
-                    lwe_ciphertext_cleartext_mul_assign(&mut output, Cleartext(*elt));
-                    output
-                }))
-            })
-            .fold(vec![zero; p], |mut acc, elt| {
-                acc.iter_mut()
-                    .zip(elt.iter())
-                    .for_each(|(dst, src)| lwe_ciphertext_add_assign(dst, src));
-                acc
-            });
-        let lut = LUT::from_vec_of_lwe(&l, &self, ctx);
-        self.blind_array_access(&y, &lut, ctx)
     }
 
     pub fn blind_matrix_set(
@@ -2347,7 +2312,7 @@ mod test {
         let decrypted = plaintext.0 / ctx.delta();
         println!("decrypted: {}", decrypted);
     }
-  
+
     #[test]
     fn test_lut_enc() {
         let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);

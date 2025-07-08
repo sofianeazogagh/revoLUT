@@ -4,10 +4,7 @@
 use std::time::Instant;
 
 use revolut::{lut::MNLUT, nlwe::NLWE, packed_lut::PackedMNLUT, *};
-use tfhe::{
-    core_crypto::prelude::{blind_rotate_assign, lwe_ciphertext_sub_assign},
-    shortint::parameters::*,
-};
+use tfhe::shortint::parameters::*;
 
 // mod uni_test;
 // use uni_test::*;
