@@ -10,7 +10,6 @@ use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::{fs, io};
-// use tfhe::integer::ciphertext::BaseRadixCiphertext;
 // use std::process::Output;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -30,6 +29,9 @@ use rand::Rng;
 
 mod blind_sort;
 mod blind_topk;
+pub mod lut;
+pub mod nlwe;
+pub mod packed_lut;
 pub mod radix;
 
 pub type LWE = LweCiphertext<Vec<u64>>;
@@ -116,8 +118,8 @@ pub struct Context {
     big_lwe_dimension: LweDimension,
     delta: u64,
     full_message_modulus: usize,
-    signed_decomposer: SignedDecomposer<u64>,
-    encryption_generator: EncryptionRandomGenerator<ActivatedRandomGenerator>,
+    pub signed_decomposer: SignedDecomposer<u64>,
+    pub encryption_generator: EncryptionRandomGenerator<ActivatedRandomGenerator>,
     secret_generator: SecretRandomGenerator<ActivatedRandomGenerator>,
     box_size: usize,
     ciphertext_modulus: CiphertextModulus,
@@ -338,36 +340,36 @@ impl PrivateKey {
         // Create Packing Key Switch
 
         // Private Functional Packing Key Switch Key
-        print!("generating lwe private functional packing keyswitch key: ");
-        let _ = io::stdout().flush();
-        let start = Instant::now();
-        let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
-            0,
-            ctx.pfks_base_log(),
-            ctx.pfks_level(),
-            ctx.big_lwe_dimension(),
-            ctx.glwe_dimension().to_glwe_size(),
-            ctx.polynomial_size(),
-            ctx.ciphertext_modulus(),
-        );
+        // print!("generating lwe private functional packing keyswitch key: ");
+        // let _ = io::stdout().flush();
+        // let start = Instant::now();
+        // let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
+        //     0,
+        //     ctx.pfks_base_log(),
+        //     ctx.pfks_level(),
+        //     ctx.big_lwe_dimension(),
+        //     ctx.glwe_dimension().to_glwe_size(),
+        //     ctx.polynomial_size(),
+        //     ctx.ciphertext_modulus(),
+        // );
 
-        // Here there is some freedom for the choice of the last polynomial from algorithm 2
-        // By convention from the paper the polynomial we use here is the constant -1
-        let mut last_polynomial = Polynomial::new(0, ctx.polynomial_size());
-        // Set the constant term to u64::MAX == -1i64
-        // last_polynomial[0] = u64::MAX;
-        last_polynomial[0] = 1_u64;
-        // Generate the LWE private functional packing keyswitch key
-        par_generate_lwe_private_functional_packing_keyswitch_key(
-            &glwe_sk.as_lwe_secret_key(),
-            &glwe_sk,
-            &mut pfpksk,
-            ctx.parameters.glwe_noise_distribution,
-            &mut ctx.encryption_generator,
-            |x| x,
-            &last_polynomial,
-        );
-        println!("{:?}", Instant::now() - start);
+        // // Here there is some freedom for the choice of the last polynomial from algorithm 2
+        // // By convention from the paper the polynomial we use here is the constant -1
+        // let mut last_polynomial = Polynomial::new(0, ctx.polynomial_size());
+        // // Set the constant term to u64::MAX == -1i64
+        // // last_polynomial[0] = u64::MAX;
+        // last_polynomial[0] = 1_u64;
+        // // Generate the LWE private functional packing keyswitch key
+        // par_generate_lwe_private_functional_packing_keyswitch_key(
+        //     &glwe_sk.as_lwe_secret_key(),
+        //     &glwe_sk,
+        //     &mut pfpksk,
+        //     ctx.parameters.glwe_noise_distribution,
+        //     &mut ctx.encryption_generator,
+        //     |x| x,
+        //     &last_polynomial,
+        // );
+        // println!("{:?}", Instant::now() - start);
 
         // Public Packing Key Switch
         print!("generating lwe packing keyswitch key: ");
@@ -385,12 +387,13 @@ impl PrivateKey {
         println!("{:?}", Instant::now() - start);
 
         println!("----- Keys generated -----");
-
+        //
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
-            pfpksk,
+            // pfpksk,
             packing_ksk,
+            // mb_pbs_key: multi_bit_bsk,
         };
 
         PrivateKey {
@@ -507,7 +510,7 @@ impl PrivateKey {
     pub fn decrypt_lwe(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
         // Decrypt the PBS multiplication result
         let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext);
-        let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
+        let result = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
         result % ctx.full_message_modulus() as u64
     }
 
@@ -824,8 +827,9 @@ pub struct PublicKey {
     // utilKey ou ServerKey ou CloudKey
     pub lwe_ksk: LweKeyswitchKey<Vec<u64>>,
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
-    pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
+    // pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub packing_ksk: LwePackingKeyswitchKey<Vec<u64>>,
+    // pub mb_pbs_key: FourierLweMultiBitBootstrapKeyOwned,
 }
 
 impl PublicKey {
@@ -1143,6 +1147,33 @@ impl PublicKey {
         self.blind_array_access(&line, &accumulator_final, ctx)
     }
 
+    /// PIR-like construction to access a matrix element blindly, returns Enc(matrix[x][y])
+    /// time: 2BR + pKS
+    pub fn blind_matrix_access_clear(
+        &self,
+        matrix: &Vec<Vec<u64>>,
+        x: &LWE,
+        y: &LWE,
+        ctx: &Context,
+    ) -> LWE {
+        let p = ctx.full_message_modulus;
+        let mut lut = LUT::from_vec_trivially(&vec![1], ctx);
+        self.blind_rotation_assign(&self.neg_lwe(&y, &ctx), &mut lut, ctx);
+        let onehot = lut.to_many_lwe(&self, ctx);
+        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let column = Vec::from_iter(matrix.iter().map(|line| {
+            let mut output = zero.clone();
+            for (lwe, elt) in onehot.iter().zip(line.iter()) {
+                let mut encrypted_bool = lwe.clone();
+                lwe_ciphertext_cleartext_mul_assign(&mut encrypted_bool, Cleartext(*elt));
+                lwe_ciphertext_add_assign(&mut output, &encrypted_bool);
+            }
+            output
+        }));
+        let lut = LUT::from_vec_of_lwe(&column, &self, ctx);
+        self.blind_array_access(&x, &lut, ctx)
+    }
+
     pub fn blind_matrix_add(
         &self,
         matrix: &mut [LUT],
@@ -1159,41 +1190,6 @@ impl PublicKey {
             let x = self.lut_extract(&column_lut, i, ctx);
             self.blind_array_increment(lut, &column, &x, ctx);
         }
-    }
-
-    /// PIR-like construction to access a matrix element blindly, returns Enc(matrix[x][y])
-    /// time: 2BR + pKS
-    pub fn blind_matrix_access_clear(
-        &self,
-        matrix: &Vec<Vec<u64>>,
-        x: &LWE,
-        y: &LWE,
-        ctx: &Context,
-    ) -> LWE {
-        let p = ctx.full_message_modulus;
-        let mut lut = LUT::from_vec_trivially(&vec![1], ctx);
-        self.blind_rotation_assign(&self.neg_lwe(&x, &ctx), &mut lut, ctx);
-        let onehot = lut.to_many_lwe(&self, ctx);
-        let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
-        let l = matrix
-            .iter()
-            .enumerate()
-            .map(|(i, line)| {
-                let xi = onehot[i].clone();
-                Vec::from_iter(line.iter().map(|elt| {
-                    let mut output = xi.clone();
-                    lwe_ciphertext_cleartext_mul_assign(&mut output, Cleartext(*elt));
-                    output
-                }))
-            })
-            .fold(vec![zero; p], |mut acc, elt| {
-                acc.iter_mut()
-                    .zip(elt.iter())
-                    .for_each(|(dst, src)| lwe_ciphertext_add_assign(dst, src));
-                acc
-            });
-        let lut = LUT::from_vec_of_lwe(&l, &self, ctx);
-        self.blind_array_access(&y, &lut, ctx)
     }
 
     pub fn blind_matrix_set(
@@ -2198,6 +2194,8 @@ impl LUTStack {
 
 #[cfg(test)]
 mod test {
+    use std::array;
+    use std::cmp;
     use std::time::Instant;
 
     use super::*;
@@ -2313,63 +2311,6 @@ mod test {
         let plaintext = decrypt_lwe_ciphertext(&private_key.get_big_lwe_sk(), &lwe1);
         let decrypted = plaintext.0 / ctx.delta();
         println!("decrypted: {}", decrypted);
-    }
-
-    #[test]
-    fn test_lwe_mul_add() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(ctx.parameters);
-        let public_key = &private_key.public_key;
-
-        // Test values
-        let input1: u64 = 1;
-        let input2: u64 = 0;
-        let scalar: u64 = 2;
-
-        // Encrypt input
-        let lwe1 = private_key.allocate_and_encrypt_lwe(input1, &mut ctx);
-        let lwe2 = private_key.allocate_and_encrypt_lwe(input2, &mut ctx);
-
-        // Perform scalar multiplication and addition
-        let res = public_key.lwe_mul_add(&lwe1, &lwe2, scalar);
-
-        // Decrypt result
-        let clear = private_key.decrypt_lwe(&res, &mut ctx);
-
-        println!("Test lwe_mul_add_assign");
-        println!("input1: {}", input1);
-        println!("input2: {}", input2);
-        println!("scalar: {}", scalar);
-        println!("decrypted result: {}", clear);
-
-        assert_eq!(clear, input1 + (scalar * input2));
-    }
-
-    #[test]
-    fn test_lwe_mul_add_assign() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(ctx.parameters);
-        let public_key = &private_key.public_key;
-
-        // Test values
-        let input: u64 = 1;
-        let scalar: u64 = 2;
-
-        // Encrypt input
-        let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
-
-        // Perform scalar multiplication and addition
-        public_key.lwe_mul_add_assign(&mut lwe, scalar);
-
-        // Decrypt result
-        let clear = private_key.decrypt_lwe(&lwe, &mut ctx);
-
-        println!("Test lwe_mul_add_assign");
-        println!("input: {}", input);
-        println!("scalar: {}", scalar);
-        println!("decrypted result: {}", clear);
-
-        assert_eq!(clear, input + (scalar * input));
     }
 
     #[test]
@@ -3216,10 +3157,13 @@ mod test {
                 let start = Instant::now();
                 let result = public_key.lwe_mul(&lwe1, &lwe2, &ctx);
                 let end = Instant::now();
-                println!("Time taken for lwe_mul: {:?}", end.duration_since(start));
+                let decrypted = private_key.decrypt_lwe(&result, &ctx);
+                println!(
+                    "{val1} x {val2} = {decrypted} (Time taken for lwe_mul: {:?})",
+                    end.duration_since(start)
+                );
 
                 // Decrypt and verify result
-                let decrypted = private_key.decrypt_lwe(&result, &ctx);
                 assert_eq!(decrypted, expected % ctx.message_modulus().0 as u64);
             }
         }
@@ -3302,30 +3246,6 @@ mod test {
             }
         }
     }
-
-    // #[test]
-    // fn test_blind_matrix_access() {
-    //     let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-    //     let private_key = key(ctx.parameters);
-    //     let public_key = &private_key.public_key;
-
-    //     let matrix = Vec::from_iter(
-    //         (0..16).map(|_| LUT::from_vec(&Vec::from_iter(0..16), &private_key, &mut ctx)),
-    //     );
-
-    //     for l in 0..16 {
-    //         let line = private_key.allocate_and_encrypt_lwe(l, &mut ctx);
-    //         for c in 0..16 {
-    //             let column = private_key.allocate_and_encrypt_lwe(c, &mut ctx);
-    //             let ciphertext = public_key.blind_matrix_access(&matrix, &line, &column, &ctx);
-    //             let actual = private_key.decrypt_lwe(&ciphertext, &ctx);
-
-    //             println!("({l}, {c}): {actual}");
-
-    //             assert_eq!(actual, c);
-    //         }
-    //     }
-    // }
 
     #[test]
     fn test_blind_matrix_add() {
