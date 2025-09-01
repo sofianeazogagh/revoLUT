@@ -337,9 +337,9 @@ impl PrivateKey {
         );
         println!("{:?}", Instant::now() - start);
 
-        Create Packing Key Switch
-
-        Private Functional Packing Key Switch Key
+        // Create Packing Key Switch
+        //
+        // Private Functional Packing Key Switch Key
         print!("generating lwe private functional packing keyswitch key: ");
         let _ = io::stdout().flush();
         let start = Instant::now();
