@@ -342,7 +342,7 @@ impl PrivateKey {
         // Private Functional Packing Key Switch Key
         print!("generating lwe private functional packing keyswitch key: ");
         let _ = io::stdout().flush();
-        let start = Instant::now();
+        // let start = Instant::now();
         let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
             0,
             ctx.pfks_base_log(),
@@ -351,6 +351,19 @@ impl PrivateKey {
             ctx.glwe_dimension().to_glwe_size(),
             ctx.polynomial_size(),
             ctx.ciphertext_modulus(),
+        );
+
+
+        print!("generating lwe private functional packing keyswitch key list: ");
+        let _ = io::stdout().flush();
+        let cbs_pfpksk = par_allocate_and_generate_new_circuit_bootstrap_lwe_pfpksk_list(
+            &glwe_sk.as_lwe_secret_key(),
+            &glwe_sk,
+            ctx.pfks_base_log(),
+            ctx.pfks_level(),
+            ctx.parameters.glwe_noise_distribution,
+            ctx.ciphertext_modulus(),
+            &mut encryption_generator,
         );
 
         // // Here there is some freedom for the choice of the last polynomial from algorithm 2
@@ -393,6 +406,7 @@ impl PrivateKey {
             fourier_bsk,
             pfpksk,
             packing_ksk,
+            cbs_pfpksk,
             // mb_pbs_key: multi_bit_bsk,
         };
 
@@ -829,6 +843,8 @@ pub struct PublicKey {
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
     pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub packing_ksk: LwePackingKeyswitchKey<Vec<u64>>,
+    pub cbs_pfpksk: LwePrivateFunctionalPackingKeyswitchKeyList<Vec<u64>>,
+
     // pub mb_pbs_key: FourierLweMultiBitBootstrapKeyOwned,
 }
 
