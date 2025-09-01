@@ -363,7 +363,7 @@ impl PrivateKey {
             ctx.pfks_level(),
             ctx.parameters.glwe_noise_distribution,
             ctx.ciphertext_modulus(),
-            &mut encryption_generator,
+            &mut ctx.encryption_generator,
         );
 
         // // Here there is some freedom for the choice of the last polynomial from algorithm 2
