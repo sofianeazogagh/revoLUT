@@ -241,9 +241,9 @@ impl Context {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PrivateKey {
-    small_lwe_sk: LweSecretKey<Vec<u64>>,
+    pub small_lwe_sk: LweSecretKey<Vec<u64>>,
     // big_lwe_sk: LweSecretKey<Vec<u64>>,
-    glwe_sk: GlweSecretKey<Vec<u64>>,
+    pub glwe_sk: GlweSecretKey<Vec<u64>>,
     pub public_key: PublicKey,
 }
 
