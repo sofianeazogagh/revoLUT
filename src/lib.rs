@@ -337,21 +337,21 @@ impl PrivateKey {
         );
         println!("{:?}", Instant::now() - start);
 
-        // Create Packing Key Switch
+        Create Packing Key Switch
 
-        // Private Functional Packing Key Switch Key
-        // print!("generating lwe private functional packing keyswitch key: ");
-        // let _ = io::stdout().flush();
-        // let start = Instant::now();
-        // let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
-        //     0,
-        //     ctx.pfks_base_log(),
-        //     ctx.pfks_level(),
-        //     ctx.big_lwe_dimension(),
-        //     ctx.glwe_dimension().to_glwe_size(),
-        //     ctx.polynomial_size(),
-        //     ctx.ciphertext_modulus(),
-        // );
+        Private Functional Packing Key Switch Key
+        print!("generating lwe private functional packing keyswitch key: ");
+        let _ = io::stdout().flush();
+        let start = Instant::now();
+        let mut pfpksk = LwePrivateFunctionalPackingKeyswitchKey::new(
+            0,
+            ctx.pfks_base_log(),
+            ctx.pfks_level(),
+            ctx.big_lwe_dimension(),
+            ctx.glwe_dimension().to_glwe_size(),
+            ctx.polynomial_size(),
+            ctx.ciphertext_modulus(),
+        );
 
         // // Here there is some freedom for the choice of the last polynomial from algorithm 2
         // // By convention from the paper the polynomial we use here is the constant -1
@@ -391,7 +391,7 @@ impl PrivateKey {
         let public_key = PublicKey {
             lwe_ksk,
             fourier_bsk,
-            // pfpksk,
+            pfpksk,
             packing_ksk,
             // mb_pbs_key: multi_bit_bsk,
         };
@@ -827,7 +827,7 @@ pub struct PublicKey {
     // utilKey ou ServerKey ou CloudKey
     pub lwe_ksk: LweKeyswitchKey<Vec<u64>>,
     pub fourier_bsk: FourierLweBootstrapKey<ABox<[Complex<f64>]>>,
-    // pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
+    pub pfpksk: LwePrivateFunctionalPackingKeyswitchKey<Vec<u64>>,
     pub packing_ksk: LwePackingKeyswitchKey<Vec<u64>>,
     // pub mb_pbs_key: FourierLweMultiBitBootstrapKeyOwned,
 }
