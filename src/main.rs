@@ -6,6 +6,8 @@ use std::time::Instant;
 use revolut::{lut::MNLUT, nlwe::NLWE, packed_lut::PackedMNLUT, *};
 use tfhe::shortint::parameters::*;
 
+mod matmul;
+
 // mod uni_test;
 // use uni_test::*;
 

@@ -508,14 +508,12 @@ impl PrivateKey {
     }
 
     pub fn decrypt_lwe(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
-        // Decrypt the PBS multiplication result
         let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext);
         let result = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
         result % ctx.full_message_modulus() as u64
     }
 
     pub fn decrypt_lwe_without_reduction(&self, ciphertext: &LWE, ctx: &Context) -> u64 {
-        // Decrypt the PBS multiplication result
         let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext);
         // let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / ctx.delta();
         let decoded = Self::decode(ctx.parameters, plaintext.0);
@@ -523,7 +521,6 @@ impl PrivateKey {
     }
 
     pub fn decrypt_lwe_delta(&self, ciphertext: &LWE, delta: u64, ctx: &Context) -> u64 {
-        // Decrypt the PBS multiplication result
         let plaintext: Plaintext<u64> = decrypt_lwe_ciphertext(&self.get_big_lwe_sk(), &ciphertext);
         let result: u64 = ctx.signed_decomposer.closest_representable(plaintext.0) / delta
             % ctx.full_message_modulus() as u64;

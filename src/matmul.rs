@@ -130,12 +130,14 @@ mod tests {
         // let matrix = vec![vec![1, 0, 0], vec![0, 1, 0], vec![0, 0, 1]];
 
         let p = ctx.full_message_modulus();
+        let n = ctx.polynomial_size().0;
 
         // Define a random matrix of size t*n with elements modulo 16
+        let mat_size = n - 1 as usize;
         let mut rng = rand::thread_rng();
-        let mut matrix = vec![vec![0; p]; p];
-        for i in 0..p {
-            for j in 0..p {
+        let mut matrix = vec![vec![0; mat_size]; mat_size];
+        for i in 0..mat_size {
+            for j in 0..mat_size {
                 matrix[i][j] = rng.gen_range(0..p) as u64;
             }
         }
@@ -160,9 +162,9 @@ mod tests {
             .collect::<Vec<_>>();
 
         // Calculate the expected result by performing matrix-vector multiplication
-        let mut expected = vec![0; p as usize];
-        for i in 0..p as usize {
-            for j in 0..p {
+        let mut expected = vec![0; mat_size as usize];
+        for i in 0..mat_size as usize {
+            for j in 0..mat_size as usize {
                 expected[i] += matrix[i][j] * v[j] as u64;
             }
         }
