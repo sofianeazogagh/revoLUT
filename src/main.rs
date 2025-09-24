@@ -5,6 +5,16 @@ use std::time::Instant;
 
 use revolut::{lut::MNLUT, nlwe::NLWE, packed_lut::PackedMNLUT, *};
 use tfhe::shortint::parameters::*;
+use rayon::prelude::*;
+use tfhe::shortint::parameters::{
+    ClassicPBSParameters, MessageModulus, CarryModulus, LweDimension, GlweDimension,
+    PolynomialSize, DynamicDistribution, StandardDev, DecompositionBaseLog,
+    DecompositionLevelCount, MaxNoiseLevel, CiphertextModulus, EncryptionKeyChoice,
+    ModulusSwitchType,
+};
+
+use tfhe::shortint::parameters::v1_2::classic::gaussian::p_fail_2_minus_64::ks_pbs::
+V1_2_PARAM_MESSAGE_4_CARRY_4_KS_PBS_GAUSSIAN_2M64;
 
 // mod uni_test;
 // use uni_test::*;
@@ -20,7 +30,7 @@ pub fn generate_keys() {
         // PARAM_MESSAGE_4_CARRY_0,
         // PARAM_MESSAGE_5_CARRY_0,
         // PARAM_MESSAGE_6_CARRY_0,
-        PARAM_MESSAGE_7_CARRY_0,
+        // PARAM_MESSAGE_7_CARRY_0,
         // PARAM_MESSAGE_8_CARRY_0,
     ];
     for param in params {
@@ -29,44 +39,143 @@ pub fn generate_keys() {
     }
 }
 
-pub fn bench_blind_read() {
-    let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-    let private_key = key(ctx.parameters());
-    let public_key = &private_key.public_key;
-    let p = ctx.full_message_modulus() as u64;
-    // 64k values
-    // let data = Vec::from_iter(0..p.pow(4));
-    // 1M values
-    let data = Vec::from_iter(0..p.pow(5));
-
-    println!("Blind Read benchmarks for p = {p}");
-    for m in 3..=3 {
-        let n = 2;
-        // for n in 1..=4 {
-        let lut = MNLUT::from_plain(&data, m, n, &private_key, &mut ctx);
-        let start = Instant::now();
-        let mut lut = PackedMNLUT::from_mnlut(&lut, &ctx, &private_key.public_key);
-        println!("PackedMNLUT created in {:?}", Instant::now() - start);
-        print!(
-            "M = {m}, N = {n} (up to {} values mod {}): ",
-            p.pow(m as u32),
-            p.pow(n as u32)
-        );
-        let index = NLWE::from_plain(0, m, &mut ctx, &private_key);
-        let value = NLWE::from_plain(0, n, &mut ctx, &private_key);
-        let start = Instant::now();
-        // MNLUT::blind_tensor_lift(&index, &value, &ctx, &private_key.public_key);
-        // let nlwe = lut.blind_tensor_access(&index, &ctx, &private_key.public_key);
-        lut.blind_tensor_update(&index, |_| value.clone(), &ctx, public_key);
-        // lut.blind_tensor_add_digitwise_overflow(&index, &value, &ctx, &public_key);
-        let elapsed = Instant::now() - start;
-        println!("{:?}", elapsed);
-        // assert_eq!(nlwe.to_plain(&ctx, &private_key), 0);
-        // }
-    }
-}
+// pub fn bench_blind_read() {
+//      let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+//     let private_key = key(ctx.parameters());
+//     let public_key = &private_key.public_key;
+//     let p = ctx.full_message_modulus() as u64;
+//     // 64k values
+//     // let data = Vec::from_iter(0..p.pow(4));
+//     // 1M values
+//     let data = Vec::from_iter(0..p.pow(5));
+//
+//     println!("Blind Read benchmarks for p = {p}");
+//     for m in 3..=3 {
+//         let n = 2;
+//         // for n in 1..=4 {
+//         let lut = MNLUT::from_plain(&data, m, n, &private_key, &mut ctx);
+//         let start = Instant::now();
+//         let mut lut = PackedMNLUT::from_mnlut(&lut, &ctx, &private_key.public_key);
+//         println!("PackedMNLUT created in {:?}", Instant::now() - start);
+//         print!(
+//             "M = {m}, N = {n} (up to {} values mod {}): ",
+//             p.pow(m as u32),
+//             p.pow(n as u32)
+//         );
+//         let index = NLWE::from_plain(0, m, &mut ctx, &private_key);
+//         let value = NLWE::from_plain(0, n, &mut ctx, &private_key);
+//         let start = Instant::now();
+//         // MNLUT::blind_tensor_lift(&index, &value, &ctx, &private_key.public_key);
+//         // let nlwe = lut.blind_tensor_access(&index, &ctx, &private_key.public_key);
+//         lut.blind_tensor_update(&index, |_| value.clone(), &ctx, public_key);
+//         // lut.blind_tensor_add_digitwise_overflow(&index, &value, &ctx, &public_key);
+//         let elapsed = Instant::now() - start;
+//         println!("{:?}", elapsed);
+//         // assert_eq!(nlwe.to_plain(&ctx, &private_key), 0);
+//         // }
+//     }
+// }
 
 pub fn main() {
+    // let param = PARAM_MESSAGE_4_CARRY_4_KS_PBS;
+    let param = ClassicPBSParameters {
+        lwe_dimension: LweDimension(761),
+        glwe_dimension: GlweDimension(1),
+        polynomial_size: PolynomialSize(2048),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            6.36835566258815e-06,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            3.1529322391500584e-16,)),
+        pbs_base_log: DecompositionBaseLog(23),
+        pbs_level: DecompositionLevelCount(1),
+        ks_base_log: DecompositionBaseLog(3),
+        ks_level: DecompositionLevelCount(5),
+        message_modulus: MessageModulus(16), // 4 bits
+        carry_modulus:   CarryModulus(1),    // 0 bits of carry
+        max_noise_level: MaxNoiseLevel::from_msg_carry_modulus(MessageModulus(16), CarryModulus(1)),
+        log2_p_fail: -40.315,
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+        modulus_switch_noise_reduction_params: ModulusSwitchType::Standard,
+    };
+
+    let mut ctx = Context::from(param);
+    let private_key = key(ctx.parameters());
+    let public_key = private_key.get_public_key();
+
+    let lwes = vec![private_key.allocate_and_encrypt_lwe(0,&mut ctx);ctx.message_modulus().0 as usize];
+
+    let lut = LUT::from_vec_of_lwe(&lwes, &public_key, &ctx);
+    let start = Instant::now();
+    for _i in 0..100 {
+        let result = lut.to_many_lut(&public_key,&ctx);
+    }
+    println!("LUT generated in {:?}", Instant::now() - start);
+
+    let start = Instant::now();
+    for _i in 0..100 {
+        let result = lut.to_many_lut_par(&public_key,&ctx);
+    }
+    println!("LUT generated in {:?}", Instant::now() - start);
+
+
+
+    // let start = Instant::now();
+    // for _i in 0..100 {
+    //     LUT::from_vec_of_lwe(&lwes, &public_key, &ctx);
+    // }
+    // println!("LUT generated in {:?}", Instant::now() - start);
+    //
+    // let start = Instant::now();
+    // for _i in 0..100 {
+    //     LUT::from_vec_of_lwe_par(&lwes,&public_key,&ctx);
+    // }
+    // println!("LUT generated in {:?}", Instant::now() - start);
+
+    // let mut matrix:Vec<LUT> = vec![];
+    // for _i in 0..ctx.message_modulus().0 {
+    //     matrix.push(LUT::from_vec_of_lwe(&lwes, &public_key, &ctx));
+    // }
+    //
+    // let start = Instant::now();
+    // for _i in 0..100 {
+    //     public_key.blind_matrix_access(&matrix,&lwes[0],&lwes[0],&ctx);
+    // }
+    // println!("BMA done in {:?}", Instant::now() - start);
+    //
+    // let start = Instant::now();
+    // for _i in 0..100 {
+    //     public_key.blind_matrix_access_par(&matrix,&lwes[0],&lwes[0],&ctx);
+    // }
+    // println!("BMA done in {:?}", Instant::now() - start);
+
+
+    // let param = ClassicPBSParameters {
+    //     message_modulus: MessageModulus(16),
+    //     carry_modulus: CarryModulus(1),
+    //     max_noise_level: MaxNoiseLevel::from_msg_carry_modulus(MessageModulus(16), CarryModulus(1)),
+    //
+    //     ..V1_2_PARAM_MESSAGE_4_CARRY_4_KS_PBS_GAUSSIAN_2M64
+    // };
+    //
+    // let mut ctx = Context::from(param);
+    //
+    // let private_key = key(ctx.parameters());
+    // let public_key = private_key.get_public_key();
+    // let lwes = vec![private_key.allocate_and_encrypt_lwe(0,&mut ctx);ctx.message_modulus().0 as usize];
+
+    // let start = Instant::now();
+    // for i in 0..100 {
+    //     LUT::from_vec_of_lwe(&lwes, &public_key, &ctx);
+    // }
+    // println!("LUT generated in {:?}", Instant::now() - start);
+
+    // let start = Instant::now();
+    // for i in 0..100 {
+    //     LUT::from_vec_of_lwe_par(&lwes,&public_key,&ctx);
+    // }
+    // println!("LUT generated in {:?}", Instant::now() - start);
     // let mut ctx = Context::from(PARAM_MESSAGE_7_CARRY_0);
 
     // let start = Instant::now();
@@ -105,7 +214,7 @@ pub fn main() {
     // }
 
     // generate_keys();
-    bench_blind_read();
+    // bench_blind_read();
     // let param = PARAM_MESSAGE_4_CARRY_0;
     // let mut ctx = Context::from(param);
     // let private_key = key(param);
