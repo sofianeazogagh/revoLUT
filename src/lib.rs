@@ -3543,7 +3543,7 @@ pub struct StdMsLwe {
 
 impl StdMsLwe {
     /// Build from an LWE by switching its mask/body to `log_modulus`
-    fn from_lwe<Scalar>(ct: &LweCiphertext<Vec<Scalar>>, log_modulus: CiphertextModulusLog) -> Self
+    pub fn from_lwe<Scalar>(ct: &LweCiphertext<Vec<Scalar>>, log_modulus: CiphertextModulusLog) -> Self
         where
             Scalar: UnsignedInteger + CastInto<usize>,
     {
