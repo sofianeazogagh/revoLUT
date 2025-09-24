@@ -143,7 +143,7 @@ mod tests {
         }
 
         // Define a GLWE ciphertext vector
-        let v = vec![1; p as usize];
+        let v = vec![1; mat_size as usize];
         let ct_vec = private_key.allocate_and_encrypt_glwe_from_vec(&v, &mut ctx);
 
         // Call the mat_vec_mul function
