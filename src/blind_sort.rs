@@ -165,10 +165,11 @@ mod tests {
     use crate::*;
     use itertools::sorted;
     use tfhe::shortint::parameters::*;
+    use crate::params::{param_3, param_4, param_6};
 
     #[test]
     fn test_blind_lt() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let n = ctx.full_message_modulus();
         let public_key = &private_key.public_key;
@@ -190,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_blind_sort_bma() {
-        let params = [PARAM_MESSAGE_3_CARRY_0, PARAM_MESSAGE_4_CARRY_0];
+        let params = [param_3(), param_4()];
         let arrays = [
             vec![1, 2, 1, 0, 2, 1, 2, 3],
             vec![1, 3, 2, 4, 4, 7, 6, 5, 6, 6, 6, 6, 6, 6, 6, 6],
@@ -220,8 +221,8 @@ mod tests {
 
     #[test]
     fn test_blind_sort_2bp() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
         let array = vec![1, 3, 2, 0, 6, 5, 7, 4, 8, 10, 9, 11, 13, 15, 14, 12];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
@@ -244,8 +245,8 @@ mod tests {
 
     #[test]
     fn test_compute_compact_permutation() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
         let array = vec![0, 0, 2, 3, 0, 5, 0, 7];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
@@ -262,7 +263,7 @@ mod tests {
     #[test]
     // FIXME: this test is not working
     fn test_blind_counting_sort() {
-        let param = PARAM_MESSAGE_4_CARRY_0;
+        let param = param_4();
         let mut ctx = Context::from(param);
         let private_key = key(param);
         let public_key = &private_key.public_key;
@@ -286,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_many_blind_counting_sort() {
-        let param = PARAM_MESSAGE_3_CARRY_0;
+        let param = param_3();
         let mut ctx = Context::from(param);
         let private_key = key(param);
         let public_key = &private_key.public_key;
@@ -317,7 +318,7 @@ mod tests {
     }
     #[test]
     fn test_blind_rotation_assign() {
-        let param = PARAM_MESSAGE_6_CARRY_0;
+        let param = param_6();
         let mut ctx = Context::from(param);
         let private_key = key(param);
         let public_key = &private_key.public_key;
@@ -327,7 +328,13 @@ mod tests {
         let input = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
         private_key.debug_glwe("before blind_rotation_assign = ", &lut.0, &ctx);
         let begin = Instant::now();
-        blind_rotate_assign(&input, &mut lut.0, &public_key.fourier_bsk);
+        let log_m = public_key
+            .fourier_bsk
+            .polynomial_size()
+            .to_blind_rotation_input_modulus_log();
+
+        let rotation_ms = StdMsLwe::from_lwe(&input, log_m);
+        blind_rotate_assign(&rotation_ms, &mut lut.0, &public_key.fourier_bsk);
         let elapsed = Instant::now() - begin;
         private_key.debug_glwe("after blind_rotation_assign = ", &lut.0, &ctx);
         println!("Time taken by blind_rotation_assign: {:?}", elapsed);
@@ -335,7 +342,7 @@ mod tests {
 
     #[test]
     fn test_blind_counting_sort_noise() {
-        let param = PARAM_MESSAGE_4_CARRY_0;
+        let param = param_4();
         let mut ctx = Context::from(param);
         let private_key = key(param);
         let public_key = &private_key.public_key;

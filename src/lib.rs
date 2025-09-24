@@ -36,6 +36,8 @@ pub mod lut;
 pub mod nlwe;
 pub mod packed_lut;
 pub mod radix;
+pub mod params;
+mod matmul;
 
 pub type LWE = LweCiphertext<Vec<u64>>;
 pub type GLWE = GlweCiphertext<Vec<u64>>;
@@ -2306,11 +2308,12 @@ mod test {
     use quickcheck::TestResult;
     use rand::seq::SliceRandom;
     use tfhe::shortint::parameters::*;
+    use crate::params::{param_2, param_4, param_5, param_6};
 
     #[test]
     fn test_lwe_add() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let input1: u64 = 19;
         let input2: u64 = 1;
         let mut lwe1 = private_key.allocate_and_encrypt_lwe(input1, &mut ctx);
@@ -2338,9 +2341,9 @@ mod test {
         let mut seeder = new_seeder();
         let seeder = seeder.as_mut();
         let mut encryption_generator =
-            EncryptionRandomGenerator::<ActivatedRandomGenerator>::new(seeder.seed(), seeder);
+            EncryptionRandomGenerator::<DefaultRandomGenerator>::new(seeder.seed(), seeder);
         let mut secret_generator =
-            SecretRandomGenerator::<ActivatedRandomGenerator>::new(seeder.seed());
+            SecretRandomGenerator::<DefaultRandomGenerator>::new(seeder.seed());
 
         // Create the LweSecretKey
         let lwe_secret_key =
@@ -2385,8 +2388,8 @@ mod test {
     }
     #[test]
     fn test_lwe_enc() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let input: u64 = 1;
         let lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
         let clear = private_key.decrypt_lwe(&lwe, &mut ctx); // decryption with reduction
@@ -2398,8 +2401,8 @@ mod test {
 
     #[test]
     fn test_add_lwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
         let input1: u64 = 16;
         let input2: u64 = 1;
@@ -2418,16 +2421,16 @@ mod test {
 
     #[test]
     fn test_lut_enc() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let array = vec![0, 1, 2, 3, 4];
         let _lut = LUT::from_vec(&array, &private_key, &mut ctx);
     }
 
     #[test]
     fn test_neg_lwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
         let input: u64 = 3;
         let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
@@ -2440,8 +2443,8 @@ mod test {
 
     #[test]
     fn test_neg_lwe_assign() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
         let input: u64 = 3;
         let mut lwe = private_key.allocate_and_encrypt_lwe(input, &mut ctx);
@@ -2454,7 +2457,7 @@ mod test {
 
     #[test]
     fn test_lut_from_many_lwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(param_2());
         let private_key = PrivateKey::new(&mut ctx);
         let public_key = &private_key.public_key;
         let our_input: Vec<u64> = vec![0, 1, 2, 3];
@@ -2471,7 +2474,7 @@ mod test {
 
     #[test]
     fn test_lut_from_lwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -2492,8 +2495,8 @@ mod test {
 
     #[test]
     fn test_eq_scalar() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.get_public_key();
         let our_input = 0u64;
         let lwe = private_key.allocate_and_encrypt_lwe(our_input, &mut ctx);
@@ -2507,8 +2510,8 @@ mod test {
 
     #[test]
     fn test_lut_stack_from_lut() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
         let array = vec![2, 1, 2, 3, 4];
         let lut = LUT::from_vec(&array, &private_key, &mut ctx);
@@ -2520,8 +2523,8 @@ mod test {
 
     #[test]
     fn test_lut_sum() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(param_2());
+        let private_key = key(param_2());
         let array1 = vec![1, 1, 0, 0];
         let array2 = vec![0, 0, 1, 1];
         let lut1 = LUT::from_vec(&array1, &private_key, &mut ctx);
@@ -2536,8 +2539,8 @@ mod test {
 
     #[test]
     fn test_lwe_sub_wrap() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
         let a = private_key.allocate_and_encrypt_lwe(0, &mut ctx);
         let b = public_key.allocate_and_trivially_encrypt_lwe(1, &ctx);
@@ -2549,8 +2552,8 @@ mod test {
 
     #[quickcheck]
     fn test_lut_extract(mut array: Vec<u64>, i: usize) -> TestResult {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
 
         array.truncate(16);
@@ -2569,8 +2572,8 @@ mod test {
 
     #[test]
     fn test_blind_permutation_time() {
-        let mut ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_5_CARRY_0);
+        let mut ctx = Context::from(param_5());
+        let private_key = key(param_5());
         let public_key = &private_key.public_key;
         // let array = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let array = Vec::from_iter(0..32);
@@ -2591,8 +2594,8 @@ mod test {
 
     #[test]
     fn test_blind_rotation_time() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
         let array = Vec::from_iter(0..16);
         let mut lut = LUT::from_vec(&array, &private_key, &mut ctx);
@@ -2623,7 +2626,13 @@ mod test {
         // blind rotation
         lut.print(&private_key, &ctx);
         let begin = Instant::now();
-        blind_rotate_assign(&lwe_rotation_amount, &mut lut.0, &public_key.fourier_bsk);
+        let log_m = public_key
+            .fourier_bsk
+            .polynomial_size()
+            .to_blind_rotation_input_modulus_log();
+
+        let rotation_ms = StdMsLwe::from_lwe(&lwe_rotation_amount, log_m);
+        blind_rotate_assign(&rotation_ms, &mut lut.0, &public_key.fourier_bsk);
         let elapsed = Instant::now() - begin;
         println!("rotated ({:?}): ", elapsed);
         lut.print(&private_key, &ctx);
@@ -2647,8 +2656,8 @@ mod test {
 
     #[test]
     fn test_blind_permutation_sort_itself() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(param_2());
+        let private_key = key(param_2());
         let public_key = &private_key.public_key;
 
         for array in (0..4u64).permutations(4) {
@@ -2680,8 +2689,8 @@ mod test {
 
     #[test]
     fn test_blind_argmin_all_distinct() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(param_2());
+        let private_key = key(param_2());
         let public_key = &private_key.public_key;
 
         for array in (0..4u64).permutations(4) {
@@ -2705,7 +2714,7 @@ mod test {
     }
 
     fn blind_array_add_prop(mut array: Vec<u64>, i: u64, x: u64) -> bool {
-        let param = PARAM_MESSAGE_2_CARRY_0;
+        let param = param_2();
         let size = param.message_modulus.0;
         let mut ctx = Context::from(param);
         let private_key = key(param);
@@ -2730,12 +2739,12 @@ mod test {
 
     #[quickcheck]
     fn test_blind_array_add_quickcheck(mut array: Vec<u64>, i: u64, x: u64) -> TestResult {
-        let param = PARAM_MESSAGE_2_CARRY_0;
+        let param = param_2();
         let size = param.message_modulus.0;
         if array.len() == 0 {
             return TestResult::discard();
         }
-        array.truncate(size);
+        array.truncate(size as usize);
         array.iter_mut().for_each(|v| *v %= size as u64);
         let i = i % array.len() as u64;
         let x = x % size as u64;
@@ -2745,7 +2754,7 @@ mod test {
 
     #[test]
     fn test_lut_from_vec_of_lwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let n = ctx.full_message_modulus();
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
@@ -2775,7 +2784,7 @@ mod test {
 
     #[test]
     fn test_bootstrap_lut() {
-        let ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let ctx = Context::from(param_2());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -2794,7 +2803,7 @@ mod test {
 
     #[test]
     fn test_glwe_ciphertext_plaintext_mul() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(param_2());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
         let plaintext_list =
@@ -2807,7 +2816,7 @@ mod test {
     }
     #[test]
     fn test_glwe_sum_polynomial() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(param_2());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -2826,7 +2835,7 @@ mod test {
     }
     #[test]
     fn test_absorption_glwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(param_2());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -2869,7 +2878,7 @@ mod test {
 
     #[test]
     fn test_absorption_glwe_with_fft() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(param_2());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -2912,7 +2921,7 @@ mod test {
 
     #[test]
     fn test_bma() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = PrivateKey::new(&mut ctx);
         let public_key = &private_key.public_key;
 
@@ -2951,7 +2960,7 @@ mod test {
     // FIXME: this test is not working
     #[test]
     fn test_mv() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -2986,7 +2995,7 @@ mod test {
 
     #[test]
     fn test_blind_index() {
-        let ctx = Context::from(PARAM_MESSAGE_5_CARRY_0);
+        let ctx = Context::from(param_5());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
         let n = ctx.full_message_modulus();
@@ -3024,7 +3033,7 @@ mod test {
     // }
     #[test]
     fn test_mul_polynomial_with_fft() {
-        let ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let ctx = Context::from(param_4());
 
         let fft = Fft::new(ctx.polynomial_size());
         let fft = fft.as_view();
@@ -3068,14 +3077,20 @@ mod test {
 
     #[test]
     fn test_compare_blind_and_public_rotation() {
-        let mut ctx = Context::from(PARAM_MESSAGE_6_CARRY_0);
+        let mut ctx = Context::from(param_6());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
         let mut lut_1 = LUT::from_vec(&vec![0, 1, 2, 3], &private_key, &mut ctx);
         let index_lwe = private_key.allocate_and_encrypt_lwe(3, &mut ctx);
         let start = Instant::now();
-        blind_rotate_assign(&index_lwe, &mut lut_1.0, &public_key.fourier_bsk);
+        let log_m = public_key
+            .fourier_bsk
+            .polynomial_size()
+            .to_blind_rotation_input_modulus_log();
+
+        let rotation_ms = StdMsLwe::from_lwe(&index_lwe, log_m);
+        blind_rotate_assign(&rotation_ms, &mut lut_1.0, &public_key.fourier_bsk);
         let end = Instant::now();
         println!(
             "Time taken for blind rotation with encrypted index: {:?}",
@@ -3099,7 +3114,7 @@ mod test {
 
     #[test]
     fn test_compare_poly_mul_fft_and_monomial() {
-        let ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let ctx = Context::from(param_2());
 
         let n = ctx.polynomial_size().0 as u64;
         let poly1 = Polynomial::from_container((0..n).collect::<Vec<u64>>());
@@ -3136,7 +3151,7 @@ mod test {
 
     #[test]
     fn test_lwe_noise() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
         // let n = ctx.full_message_modulus();
@@ -3166,7 +3181,7 @@ mod test {
     }
     #[test]
     fn test_pbs_duration() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = PrivateKey::new(&mut ctx);
         let public_key = &private_key.public_key;
 
@@ -3193,7 +3208,7 @@ mod test {
 
     #[test]
     fn test_lut_from_lwe_avg_dur() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -3214,7 +3229,7 @@ mod test {
 
     #[test]
     fn test_lut_from_vec_lwe_avg_dur() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         // let private_key = PrivateKey::new(&mut ctx);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
@@ -3243,7 +3258,7 @@ mod test {
 
     #[test]
     fn test_lwe_mul() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -3274,7 +3289,7 @@ mod test {
 
     #[test]
     fn test_blind_selection() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -3306,7 +3321,7 @@ mod test {
 
     #[test]
     fn test_private_selection() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -3333,7 +3348,7 @@ mod test {
 
     #[test]
     fn test_blind_lt_bma_mv() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -3352,7 +3367,7 @@ mod test {
 
     #[test]
     fn test_blind_matrix_add() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -3385,7 +3400,7 @@ mod test {
 
     #[test]
     fn test_blind_argmin() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -3414,7 +3429,7 @@ mod test {
 
     #[test]
     fn test_blind_argmax() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -3445,7 +3460,7 @@ mod test {
 
     #[test]
     fn test_blind_count_operation() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -3471,7 +3486,7 @@ mod test {
 
     #[test]
     fn test_blind_majority() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
         let vec = vec![1, 3, 2, 2, 1, 3, 1, 2, 3, 2];
@@ -3492,7 +3507,7 @@ mod test {
 
     #[test]
     fn test_switch_case3() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
         let p = ctx.full_message_modulus() as u64;

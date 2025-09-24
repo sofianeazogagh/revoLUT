@@ -1,5 +1,5 @@
-use revolut::{Context, Poly, PublicKey, GLWE, LWE};
 use tfhe::core_crypto::prelude::lwe_ciphertext_add_assign;
+use crate::{Context, GLWE, LWE, Poly, PublicKey};
 
 /// Encode a row
 pub fn encode_row(row: &Vec<u64>, ctx: &Context) -> Poly {
@@ -114,16 +114,15 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
-    use revolut::key;
-    use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
-
     use rand::Rng;
+    use crate::{Context, key};
+    use crate::params::param_4;
 
     #[test]
     fn test_mat_vec_mul() {
         // Setup context and public key
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
 
         // Define a simple 3x3 matrix and a GLWE ciphertext vector
@@ -175,8 +174,8 @@ mod tests {
     #[test]
     fn test_mat_vec_mul_big() {
         // Setup context and public key
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
+        let private_key = key(param_4());
         let public_key = &private_key.public_key;
 
         let n = ctx.polynomial_size().0;

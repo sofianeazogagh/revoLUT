@@ -319,10 +319,11 @@ mod tests {
     use crate::key;
     use itertools::Itertools;
     use tfhe::shortint::parameters::*;
+    use crate::params::param_4;
 
     #[test]
     pub fn test_blind_tensor_access() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let data = Vec::from_iter(0..16);
         let lut = MNLUT::from_plain(&data, 1, 1, &private_key, &mut ctx);
@@ -357,7 +358,7 @@ mod tests {
 
     #[test]
     pub fn test_blind_tensor_add_no_carry() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
 
         println!("testing MNLUT M = 2, N = 2");
@@ -387,7 +388,7 @@ mod tests {
 
     #[test]
     pub fn test_blind_tensor_increment() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let p = ctx.full_message_modulus() as u64;
         let private_key = key(ctx.parameters);
         let (m, n) = (1, 2);
@@ -411,7 +412,7 @@ mod tests {
 
     #[test]
     pub fn test_blind_radix_sort() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let (m, n) = (2, 2);
         let size = ctx.full_message_modulus().pow(m as u32) as u64;

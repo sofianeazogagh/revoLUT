@@ -662,15 +662,15 @@ mod test {
     use std::{time::Instant, u8};
 
     use quickcheck::TestResult;
-    use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
     use crate::key;
+    use crate::params::param_4;
 
     use super::*;
 
     #[test]
     fn test_byte_lut_blind_array_access() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -692,7 +692,7 @@ mod test {
 
     #[quickcheck]
     fn test_byte_lwe_add_qc(a: u8, b: u8) -> TestResult {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -713,7 +713,7 @@ mod test {
 
     #[test]
     fn test_byte_byte_lut_blind_array_add() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -756,7 +756,7 @@ mod test {
 
     #[test]
     fn test_nybl_byte_lut_blind_array_dec() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -779,7 +779,7 @@ mod test {
 
     #[test]
     fn test_keyed_blind_counting_sort() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -799,7 +799,7 @@ mod test {
 
     #[test]
     fn test_byte_byte_lut_blind_array_init() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -818,7 +818,7 @@ mod test {
 
     #[test]
     fn test_blind_radix_sort() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -832,7 +832,7 @@ mod test {
 
     #[test]
     fn test_blind_lt_byte_lwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -852,7 +852,7 @@ mod test {
 
     #[test]
     fn test_blind_gt_byte_lwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -872,7 +872,7 @@ mod test {
 
     #[test]
     fn test_blind_argmax_blwe_blwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -896,7 +896,7 @@ mod test {
 
     #[test]
     fn test_blind_argmax_blwe_lwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -920,7 +920,7 @@ mod test {
 
     #[quickcheck]
     fn test_byte_lwe_maybe_inc_qc(a: u8, b: bool) -> TestResult {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -945,7 +945,7 @@ mod test {
 
     #[test]
     fn test_byte_lwe_maybe_inc_or_dec() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
@@ -970,7 +970,7 @@ mod test {
 
     #[test]
     fn test_dirty_byte_lwe_maybe_inc_or_dec() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 

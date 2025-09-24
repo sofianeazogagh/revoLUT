@@ -154,10 +154,11 @@ mod tests {
     use crate::key;
     use std::time::Instant;
     use tfhe::shortint::parameters::*;
+    use crate::params::{param_4, param_5};
 
     #[test]
     pub fn test_blind_topk() {
-        let param = PARAM_MESSAGE_4_CARRY_0;
+        let param = param_4();
         let mut ctx = Context::from(param);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
@@ -186,7 +187,7 @@ mod tests {
 
     #[test]
     pub fn test_many_blind_topk_lut() {
-        let param = PARAM_MESSAGE_4_CARRY_0;
+        let param = param_4();
         let mut ctx = Context::from(param);
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
@@ -222,9 +223,9 @@ mod tests {
 
     #[test]
     fn test_blind_comparator() {
-        let param = PARAM_MESSAGE_4_CARRY_0;
+        let param = param_4();
         let mut ctx = Context::from(param);
-        let param_zuber = PARAM_MESSAGE_5_CARRY_0;
+        let param_zuber = param_5();
         let mut ctx_zuber = Context::from(param_zuber);
         let n = ctx.full_message_modulus();
         let private_key = key(ctx.parameters);

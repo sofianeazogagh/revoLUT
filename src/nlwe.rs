@@ -250,6 +250,7 @@ mod tests {
     use quickcheck::TestResult;
     use std::time::Instant;
     use tfhe::shortint::parameters::*;
+    use crate::params::{param_1, param_2, param_3, param_4};
 
     #[test]
     pub fn test_to_digits() {
@@ -266,15 +267,15 @@ mod tests {
 
     #[test]
     pub fn test_nlwe() {
-        let mut ctx = Context::from(PARAM_MESSAGE_1_CARRY_0);
+        let mut ctx = Context::from(param_1());
         let private_key = key(ctx.parameters);
         let nlwe = NLWE::from_plain(0b01, 2, &mut ctx, &private_key);
         assert_eq!(nlwe.to_plain(&ctx, &private_key), 0b01);
-        let mut ctx = Context::from(PARAM_MESSAGE_3_CARRY_0);
+        let mut ctx = Context::from(param_3());
         let private_key = key(ctx.parameters);
         let nlwe = NLWE::from_plain(0o1234, 4, &mut ctx, &private_key);
         assert_eq!(nlwe.to_plain(&ctx, &private_key), 0o1234);
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let private_key = key(ctx.parameters);
         let nlwe = NLWE::from_plain(0x0123456789ABCDEF, 16, &mut ctx, &private_key);
         assert_eq!(nlwe.to_plain(&ctx, &private_key), 0x0123456789ABCDEF);
@@ -282,7 +283,7 @@ mod tests {
 
     #[quickcheck]
     pub fn test_nlwe_add(i: u8, j: u8) -> TestResult {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let p = ctx.full_message_modulus() as u64;
         let n = 2;
         let size = p.pow(n as u32);
@@ -306,7 +307,7 @@ mod tests {
 
     #[test]
     pub fn test_nlwe_increment() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let mut ctx = Context::from(param_4());
         let p = ctx.full_message_modulus() as u64;
         let private_key = key(ctx.parameters);
         let n = 2;
@@ -327,7 +328,7 @@ mod tests {
 
     #[test]
     pub fn test_nlwe_decrement() {
-        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let mut ctx = Context::from(param_2());
         let p = ctx.full_message_modulus() as u64;
         let private_key = key(ctx.parameters);
         let n = 2;

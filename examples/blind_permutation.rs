@@ -1,12 +1,12 @@
 use revolut::*;
-use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
+use revolut::params::{param_1, param_2, param_3, param_4};
 
 fn main() {
     // Initialize the context
-    let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+    let mut ctx = Context::from(param_4());
 
     // Generate the keys (or read them from the file PrivateKey4 if they already exist)
-    let private_key = key(PARAM_MESSAGE_4_CARRY_0);
+    let private_key = key(param_4());
 
     // Extract the public key from the private key
     let public_key = &private_key.public_key;

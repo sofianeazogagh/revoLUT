@@ -18,6 +18,8 @@ use tfhe::shortint::parameters::{
     V1_2_PARAM_MESSAGE_4_CARRY_4_KS_PBS_GAUSSIAN_2M64 as PARAM_MESSAGE_4_CARRY_4_KS_PBS,
 };
 
+use revolut::params::param_4;
+
 // mod uni_test;
 // use uni_test::*;
 
@@ -80,27 +82,7 @@ pub fn generate_keys() {
 
 pub fn main() {
     // let param = PARAM_MESSAGE_4_CARRY_4_KS_PBS;
-    let param = ClassicPBSParameters {
-        lwe_dimension: LweDimension(761),
-        glwe_dimension: GlweDimension(1),
-        polynomial_size: PolynomialSize(2048),
-        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            6.36835566258815e-06,
-        )),
-        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
-            3.1529322391500584e-16,)),
-        pbs_base_log: DecompositionBaseLog(23),
-        pbs_level: DecompositionLevelCount(1),
-        ks_base_log: DecompositionBaseLog(3),
-        ks_level: DecompositionLevelCount(5),
-        message_modulus: MessageModulus(16), // 4 bits
-        carry_modulus:   CarryModulus(1),    // 0 bits of carry
-        max_noise_level: MaxNoiseLevel::from_msg_carry_modulus(MessageModulus(16), CarryModulus(1)),
-        log2_p_fail: -40.315,
-        ciphertext_modulus: CiphertextModulus::new_native(),
-        encryption_key_choice: EncryptionKeyChoice::Big,
-        modulus_switch_noise_reduction_params: ModulusSwitchType::Standard,
-    };
+    let param = param_4();
 
     let mut ctx = Context::from(param);
     let private_key = key(ctx.parameters());
