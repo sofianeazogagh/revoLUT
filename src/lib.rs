@@ -276,7 +276,6 @@ impl PrivateKey {
             ctx.polynomial_size(),
             &mut ctx.secret_generator,
         );
-        println!("ctx size{}",ctx.polynomial_size().0);
         println!("{:?}", Instant::now() - start);
 
         // Create a copy of the GlweSecretKey re-interpreted as an LweSecretKey
@@ -3536,7 +3535,7 @@ fn zero_glwe(public_key: &PublicKey, ctx: &Context) -> GlweCiphertext<Vec<u64>> 
 }
 
 /// Owned, modulus-switched view of an LWE mask/body to a power-of-two modulus (2^log_modulus)
-struct StdMsLwe {
+pub struct StdMsLwe {
     mask: Vec<usize>,
     body: usize,
     log_modulus: CiphertextModulusLog,

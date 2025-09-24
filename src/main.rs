@@ -13,8 +13,10 @@ use tfhe::shortint::parameters::{
     ModulusSwitchType,
 };
 
-use tfhe::shortint::parameters::v1_2::classic::gaussian::p_fail_2_minus_64::ks_pbs::
-V1_2_PARAM_MESSAGE_4_CARRY_4_KS_PBS_GAUSSIAN_2M64;
+use tfhe::shortint::parameters::{
+    v1_2::classic::gaussian::p_fail_2_minus_64::ks_pbs::
+    V1_2_PARAM_MESSAGE_4_CARRY_4_KS_PBS_GAUSSIAN_2M64 as PARAM_MESSAGE_4_CARRY_4_KS_PBS,
+};
 
 // mod uni_test;
 // use uni_test::*;
@@ -115,23 +117,10 @@ pub fn main() {
 
     let start = Instant::now();
     for _i in 0..100 {
-        let result = lut.to_many_lut_par(&public_key,&ctx);
+        LUT::from_vec_of_lwe(&lwes, &public_key, &ctx);
     }
     println!("LUT generated in {:?}", Instant::now() - start);
 
-
-
-    // let start = Instant::now();
-    // for _i in 0..100 {
-    //     LUT::from_vec_of_lwe(&lwes, &public_key, &ctx);
-    // }
-    // println!("LUT generated in {:?}", Instant::now() - start);
-    //
-    // let start = Instant::now();
-    // for _i in 0..100 {
-    //     LUT::from_vec_of_lwe_par(&lwes,&public_key,&ctx);
-    // }
-    // println!("LUT generated in {:?}", Instant::now() - start);
 
     // let mut matrix:Vec<LUT> = vec![];
     // for _i in 0..ctx.message_modulus().0 {
