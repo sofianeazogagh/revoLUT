@@ -3,7 +3,7 @@ use tfhe::core_crypto::{
     entities::LweCiphertext,
 };
 
-use crate::{Context, LUT};
+use crate::{Context, LUT, LWE};
 
 impl crate::PublicKey {
     /// compares a and b blindly, returning a cipher of 1 if a < b else 0
@@ -155,6 +155,30 @@ impl crate::PublicKey {
         // assert_eq!(result, expected, "Sorted result does not match expected");
 
         results
+    }
+
+    /// Output a sorted list of 2p LWEs given 2 sorted LUTs in 10pBR + 2p(p+2)KS
+    pub fn blind_merge(&self, l1: &LUT, l2: &LUT, ctx: &Context) -> Vec<LWE> {
+        let (mut p1, mut p2) = (ctx.zero(), ctx.zero());
+        let p = ctx.full_message_modulus();
+        let mut res = vec![];
+        for _ in 0..2 * p {
+            // 2BR
+            let x = self.blind_array_access(&p1, &l1, ctx);
+            let y = self.blind_array_access(&p2, &l2, ctx);
+            // 3BR + (p+4)KS
+            let (b, m) = self.blind_argmin(&vec![x, y], ctx);
+            let notb = {
+                let mut one = ctx.one();
+                lwe_ciphertext_sub_assign(&mut one, &b);
+                zero
+            };
+            lwe_ciphertext_add_assign(&mut p1, &notb);
+            lwe_ciphertext_add_assign(&mut p2, &b);
+            res.push(m);
+        }
+
+        res
     }
 }
 
@@ -354,6 +378,37 @@ mod tests {
                 let actual = private_key.decrypt_lwe(&lwe, &ctx);
                 assert_eq!(actual, expected_array[i]);
             }
+        }
+    }
+
+    #[test]
+    fn test_blind_merge() {
+        let param = PARAM_MESSAGE_4_CARRY_0;
+        let mut ctx = Context::from(param);
+        let p = ctx.full_message_modulus;
+        let private_key = key(param);
+        let public_key = &private_key.public_key;
+        // let array = Vec::from_iter((0..p as u64).rev());
+        let array = Vec::from_iter(0..p as u64);
+
+        let lut = LUT::from_vec(&array, &private_key, &mut ctx);
+        let begin = Instant::now();
+        let lut1 = public_key.blind_counting_sort(&lut, &ctx);
+        let elapsed = Instant::now() - begin;
+        println!("sort 1 ({:?})", elapsed);
+        let begin = Instant::now();
+        let lut2 = public_key.blind_counting_sort(&lut, &ctx);
+        let elapsed = Instant::now() - begin;
+        println!("sort 2 ({:?})", elapsed);
+        let begin = Instant::now();
+        let actual = public_key.blind_merge(&lut, &lut, &ctx);
+        let elapsed = Instant::now() - begin;
+        println!("merge ({:?})", elapsed);
+
+        for i in 0..actual.len() {
+            let result = private_key.decrypt_lwe(&actual[i], &ctx);
+            println!("{:?}", result);
+            // assert_eq!(actual, expected_array[i]);
         }
     }
 }

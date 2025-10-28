@@ -1,6 +1,9 @@
 use std::ops::Index;
 
-use tfhe::core_crypto::prelude::{lwe_ciphertext_add_assign, lwe_ciphertext_sub_assign};
+use tfhe::core_crypto::prelude::{
+    lwe_ciphertext_add_assign, lwe_ciphertext_cleartext_mul_assign, lwe_ciphertext_sub_assign,
+    Cleartext,
+};
 
 use crate::{Context, PrivateKey, PublicKey, LUT, LWE};
 
@@ -169,6 +172,110 @@ impl NLWE {
                 .map(|(a, b)| lwe_sub_overflow(&a, &b))
                 .collect(),
         }
+    }
+
+    /// blindly compares two NLWEs
+    /// return a NLWE with a single digit set to 1 if self < other, 0 otherwise
+    pub fn lt(&self, other: &NLWE, ctx: &Context, public_key: &PublicKey) -> NLWE {
+        if self.n() < other.n() {
+            NLWE::from(&ctx.one())
+        } else if self.n() > other.n() {
+            NLWE::from(&ctx.zero())
+        } else {
+            assert_eq!(self.n(), other.n());
+            let n = self.n();
+            // strictly compare all pairs of digits
+            let lts: Vec<LWE> = self
+                .digits
+                .iter()
+                .zip(&other.digits)
+                .map(|(a, b)| public_key.blind_lt_bma_mv(a, b, ctx))
+                .collect();
+            if n == 1 {
+                return NLWE::from(&lts[0]);
+            }
+
+            // equality check all pairs of digits but the last
+            let eqs: Vec<LWE> = self.digits[..n - 1]
+                .iter()
+                .zip(&other.digits[..n - 1])
+                .map(|(a, b)| public_key.blind_eq_bma_mv(a, b, ctx))
+                .collect();
+            // encrypted sum of (current digit less than and all previous digits equal)
+            // will be > 0 iff self < other, must be clamped to 1 when returned
+            let mut lt_acc = lts[0].clone();
+            let binary_clamp = LUT::from_function(|x| if x == 0 { 0 } else { 1 }, ctx);
+            // encrypted bit of first digit equal and second digit less than
+            let b = public_key.cmux(&ctx.zero(), &eqs[0], &lts[1], ctx);
+            lwe_ciphertext_add_assign(&mut lt_acc, &b);
+            if n == 2 {
+                return NLWE::from(&public_key.blind_array_access(&lt_acc, &binary_clamp, ctx));
+            }
+
+            assert!(self.n() >= 3);
+            // encrypted bit of all previous digits equal
+            let mut eq_acc = eqs[0].clone();
+            for (lt, eq) in lts[2..].iter().zip(eqs[1..].iter()) {
+                if ctx.full_message_modulus() < 16 {
+                    // eq_acc &= eq;
+                    eq_acc = public_key.cmux(&ctx.zero(), &eq_acc, eq, ctx);
+                    // b = eq_acc & lt;
+                    let b = public_key.cmux(&ctx.zero(), &eq_acc, lt, ctx);
+                    lwe_ciphertext_add_assign(&mut lt_acc, &b);
+                } else {
+                    // merge cmuxes into 2 3-bit boolean LUTs
+                    // pack (a, b, c) -> ab and (a, b, c) -> abc à la PBSManyLut
+                    let mut lut = LUT::from_vec_trivially(
+                        &vec![0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1],
+                        ctx,
+                    );
+                    // pack input eq_acc, eq, lt as (eq_acc << 3 + eq << 2 + lt)
+                    let mut input = eq_acc.clone();
+                    lwe_ciphertext_cleartext_mul_assign(&mut input, Cleartext(2));
+                    lwe_ciphertext_add_assign(&mut input, eq);
+                    lwe_ciphertext_cleartext_mul_assign(&mut input, Cleartext(2));
+                    lwe_ciphertext_add_assign(&mut input, lt);
+
+                    // evaluate both functions blindly in a single blind rotation
+                    public_key.blind_rotation_assign(&input, &mut lut, ctx);
+
+                    eq_acc = public_key.lut_extract(&lut, 0, ctx);
+                    lwe_ciphertext_add_assign(&mut lt_acc, &public_key.lut_extract(&lut, 8, ctx));
+                }
+            }
+
+            // clamp sum to {0, 1}
+            let result = public_key.blind_array_access(&lt_acc, &binary_clamp, ctx);
+            NLWE {
+                digits: vec![result],
+            }
+        }
+    }
+
+    /// Returns the minimum of two NLWEs.
+    pub fn min(&self, other: &NLWE, ctx: &Context, public_key: &PublicKey) -> NLWE {
+        let selector = self.lt(other, ctx, public_key).digits[0].clone();
+        let digits: Vec<LWE> = self
+            .digits
+            .iter()
+            .zip(other.digits.iter())
+            .map(|(a, b)| public_key.cmux(&b, &a, &selector, ctx))
+            .collect();
+        NLWE { digits }
+    }
+
+    /// Order two NLWEs
+    pub fn compare_and_swap(
+        &self,
+        other: &NLWE,
+        ctx: &Context,
+        public_key: &PublicKey,
+    ) -> (NLWE, NLWE) {
+        let min = self.min(other, ctx, public_key);
+        let max = self
+            .add_digitwise_overflow(&other)
+            .sub_digitwise_overflow(&min);
+        (min, max)
     }
 
     // Increment the NLWE
@@ -343,6 +450,83 @@ mod tests {
             let expected = (i - 1) % range;
             println!("{i}: got {actual} expected {expected} elapsed {elapsed:?}",);
             assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    pub fn test_nlwe_lt() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let p = ctx.full_message_modulus() as u64;
+        let private_key = key(ctx.parameters);
+        let n = 3;
+        let range = p.pow(n as u32);
+
+        for i in (0..range).step_by(p as usize + 3) {
+            for j in (0..range).step_by(p as usize + 5) {
+                let nlwe1 = NLWE::from_plain(i, n, &mut ctx, &private_key);
+                let nlwe2 = NLWE::from_plain(j, n, &mut ctx, &private_key);
+
+                let start = Instant::now();
+                let result = nlwe1.lt(&nlwe2, &ctx, &private_key.public_key);
+                let elapsed = Instant::now() - start;
+
+                let actual = result.to_plain(&ctx, &private_key);
+                let expected = (i < j) as u64;
+                println!("{i} < {j}: got {actual} expected {expected} elapsed {elapsed:?}",);
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[test]
+    pub fn test_nlwe_compare_and_swap() {
+        let mut ctx = Context::from(PARAM_MESSAGE_2_CARRY_0);
+        let p = ctx.full_message_modulus() as u64;
+        let private_key = key(ctx.parameters);
+        let n = 3;
+        let range = p.pow(n as u32);
+
+        for i in (0..range).step_by(p as usize + 3) {
+            for j in (0..range).step_by(p as usize + 5) {
+                let mut nlwe1 = NLWE::from_plain(i, n, &mut ctx, &private_key);
+                let nlwe2 = NLWE::from_plain(j, n, &mut ctx, &private_key);
+
+                let start = Instant::now();
+                nlwe1.compare_and_swap(&nlwe2, &ctx, &private_key.public_key);
+                let elapsed = Instant::now() - start;
+
+                let actual = nlwe1.to_plain(&ctx, &private_key);
+                let expected = if i < j { j } else { i };
+                println!("{i} < {j}: got {actual} expected {expected} elapsed {elapsed:?}",);
+                assert_eq!(actual, expected);
+            }
+        }
+    }
+
+    #[test]
+    pub fn test_nlwe_order() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let p = ctx.full_message_modulus() as u64;
+        let private_key = key(ctx.parameters);
+        let n = 2;
+        let range = p.pow(n as u32);
+
+        for i in (0..range).step_by(p as usize + 3) {
+            for j in (0..range).step_by(p as usize + 5) {
+                let nlwe1 = NLWE::from_plain(i, n, &mut ctx, &private_key);
+                let nlwe2 = NLWE::from_plain(j, n, &mut ctx, &private_key);
+
+                let start = Instant::now();
+                let (res1, res2) = nlwe1.compare_and_swap(&nlwe2, &ctx, &private_key.public_key);
+                let elapsed = Instant::now() - start;
+
+                let actual1 = res1.to_plain(&ctx, &private_key);
+                let actual2 = res2.to_plain(&ctx, &private_key);
+                let actual = (actual1, actual2);
+                let expected = (i.min(j), i.max(j));
+                println!("order {i} {j}: got {actual:?} expected {expected:?} elapsed {elapsed:?}",);
+                assert_eq!(actual, expected);
+            }
         }
     }
 }

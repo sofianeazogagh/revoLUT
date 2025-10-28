@@ -5,6 +5,7 @@ extern crate quickcheck;
 extern crate quickcheck_macros;
 
 use aligned_vec::ABox;
+use itertools::Itertools;
 use num_complex::Complex;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,7 @@ use tfhe::core_crypto::fft_impl::fft64::math::fft::FftView;
 
 use rand::Rng;
 
+pub mod blind_heap;
 mod blind_sort;
 mod blind_topk;
 pub mod lut;
@@ -235,6 +237,26 @@ impl Context {
     }
     pub fn parameters(&self) -> ClassicPBSParameters {
         self.parameters
+    }
+
+    pub fn allocate_and_trivially_encrypt_lwe(&self, input: u64) -> LWE {
+        let plaintext = Plaintext(self.delta().wrapping_mul(input));
+        // Allocate a new LweCiphertext and encrypt trivially our plaintext
+        let lwe_ciphertext: LweCiphertextOwned<u64> =
+            allocate_and_trivially_encrypt_new_lwe_ciphertext(
+                self.big_lwe_dimension().to_lwe_size(),
+                plaintext,
+                self.ciphertext_modulus(),
+            );
+        lwe_ciphertext
+    }
+
+    pub fn zero(&self) -> LWE {
+        self.allocate_and_trivially_encrypt_lwe(0)
+    }
+
+    pub fn one(&self) -> LWE {
+        self.allocate_and_trivially_encrypt_lwe(1)
     }
     // pub fn signed_decomposer(&self) -> SignedDecomposer<u64> {self.signed_decomposer}
 }
@@ -904,15 +926,7 @@ impl PublicKey {
     }
 
     pub fn allocate_and_trivially_encrypt_lwe(&self, input: u64, ctx: &Context) -> LWE {
-        let plaintext = Plaintext(ctx.delta().wrapping_mul(input));
-        // Allocate a new LweCiphertext and encrypt trivially our plaintext
-        let lwe_ciphertext: LweCiphertextOwned<u64> =
-            allocate_and_trivially_encrypt_new_lwe_ciphertext(
-                ctx.big_lwe_dimension().to_lwe_size(),
-                plaintext,
-                ctx.ciphertext_modulus(),
-            );
-        lwe_ciphertext
+        ctx.allocate_and_trivially_encrypt_lwe(input)
     }
 
     pub fn allocate_and_trivially_encrypt_glwe(
@@ -959,7 +973,7 @@ impl PublicKey {
     pub fn lwe_mul_encrypted_bit(&self, lwe: &LWE, bit: &LWE, ctx: &Context) -> LWE {
         let lwe_cp = lwe.clone();
         let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
-        self.cmux(zero, lwe_cp, bit, ctx)
+        self.cmux(&zero, &lwe_cp, bit, ctx)
     }
 
     // Simulate a multiplication of an LWE by another LWE using a LUT
@@ -1156,7 +1170,6 @@ impl PublicKey {
         y: &LWE,
         ctx: &Context,
     ) -> LWE {
-        let p = ctx.full_message_modulus;
         let mut lut = LUT::from_vec_trivially(&vec![1], ctx);
         self.blind_rotation_assign(&self.neg_lwe(&y, &ctx), &mut lut, ctx);
         let onehot = lut.to_many_lwe(&self, ctx);
@@ -1373,15 +1386,16 @@ impl PublicKey {
         self.blind_kmin_all_distinct(lut, ctx, ctx.full_message_modulus() - 1)
     }
 
+    /// 2BR + pKS
     pub fn blind_lt_bma_mv(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
         let n = ctx.full_message_modulus;
         let matrix = Vec::from_iter(
             (0..n).map(|lin| Vec::from_iter((0..n).map(|col| if lin < col { 1 } else { 0 }))),
         );
-        // let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
-        // let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
-        // self.blind_array_access(&twice_bit, &lut, &ctx)
-        self.blind_matrix_access_clear(&matrix, &a, &b, &ctx)
+        let twice_bit = self.blind_matrix_access_mv(&matrix, &a, &b, &ctx);
+        let lut = LUT::from_vec_trivially(&vec![0, 0, 1], ctx);
+        self.blind_array_access(&twice_bit, &lut, &ctx)
+        // self.blind_matrix_access_clear(&matrix, &a, &b, &ctx)
     }
 
     pub fn blind_gt_bma_mv(&self, a: &LWE, b: &LWE, ctx: &Context) -> LWE {
@@ -1650,11 +1664,27 @@ impl PublicKey {
         i
     }
 
-    // Blind select between two LWE (selector = 0 ? lwe1 : lwe2)
-    pub fn cmux(&self, lwe1: LWE, lwe2: LWE, selector: &LWE, ctx: &Context) -> LWE {
-        let vec_lwe = vec![lwe1, lwe2];
+    /// Blind select between two LWE (selector = 0 ? lwe1 : lwe2)
+    pub fn cmux(&self, lwe1: &LWE, lwe2: &LWE, selector: &LWE, ctx: &Context) -> LWE {
+        let vec_lwe = vec![lwe1.clone(), lwe2.clone()];
         let lut = LUT::from_vec_of_lwe(&vec_lwe, self, ctx);
         self.blind_array_access(&selector, &lut, ctx)
+    }
+
+    /// Blind multi-select n LWEs between two sequence of n LWEs ([lwes1, lwes2][b]) in 1BR + 2nKS
+    pub fn multicmux(&self, lwes1: &[LWE], lwes2: &[LWE], b: &LWE, ctx: &Context) -> Vec<LWE> {
+        assert_eq!(lwes1.len(), lwes2.len(), "Arrays must be the same len");
+        let n = lwes1.len();
+        let p = ctx.full_message_modulus;
+        assert!(n < p / 2, "Cannot multi-select more than p/2 elements");
+        let vec_lwe = Vec::from_iter(lwes1.iter().interleave(lwes2).cloned());
+        let mut lut = LUT::from_vec_of_lwe(&vec_lwe, self, ctx);
+        self.blind_rotation_assign(&b, &mut lut, ctx);
+        lut.to_many_lwe(&self, ctx)
+            .iter()
+            .step_by(2)
+            .cloned()
+            .collect()
     }
 
     // Blind selection of a data from a list of private data, with a list of private selector ( a la OT)
@@ -1685,26 +1715,23 @@ impl PublicKey {
         acc
     }
 
-    pub fn blind_argmin(&self, lwes: &[LWE], ctx: &Context) -> LWE {
+    /// Output the minimum of an array and it's index in (n - 1) * (3BR + (p + 4)KS)
+    pub fn blind_argmin(&self, lwes: &[LWE], ctx: &Context) -> (LWE, LWE) {
         // initialize min to the first element, and argmin to its index
         let mut min = lwes[0].clone();
         let mut argmin = self.allocate_and_trivially_encrypt_lwe(0, ctx);
 
         // loop and search for min and armgin
-        for i in 1..lwes.len() {
-            let e = lwes[i].clone();
+        for (i, e) in lwes.iter().enumerate().skip(1) {
+            let t_i = self.allocate_and_trivially_encrypt_lwe(i as u64, &ctx);
             // blind lt mv
-            let b = self.blind_lt_bma_mv(&min, &e, ctx);
-
-            let arg_e = self.allocate_and_trivially_encrypt_lwe(i as u64, &ctx);
-            let lut_indices = LUT::from_vec_of_lwe(&[arg_e, argmin], self, &ctx);
-            let lut_messages = LUT::from_vec_of_lwe(&[e, min], self, &ctx);
-
-            argmin = self.blind_array_access(&b, &lut_indices, &ctx);
-            min = self.blind_array_access(&b, &lut_messages, &ctx);
+            let b = self.blind_lt_bma_mv(&e, &min, ctx);
+            let res = self.multicmux(&vec![argmin, min], &vec![t_i, e.clone()], &b, ctx);
+            argmin = res[0].clone();
+            min = res[1].clone();
         }
 
-        argmin
+        (argmin, min)
     }
 
     pub fn blind_argmax(&self, lwes: &[LWE], ctx: &Context) -> LWE {
@@ -2193,9 +2220,7 @@ impl LUTStack {
 }
 
 #[cfg(test)]
-mod test {
-    use std::array;
-    use std::cmp;
+mod tests {
     use std::time::Instant;
 
     use super::*;
@@ -3293,7 +3318,7 @@ mod test {
             .map(|x| private_key.allocate_and_encrypt_lwe(*x, &mut ctx))
             .collect::<Vec<_>>();
 
-        let argmin = public_key.blind_argmin(&lwes, &ctx);
+        let (argmin, _) = public_key.blind_argmin(&lwes, &ctx);
 
         let actual = private_key.decrypt_lwe(&argmin, &ctx);
         assert_eq!(actual, 1);
