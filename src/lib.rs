@@ -733,7 +733,7 @@ impl PrivateKey {
         // To round our bits of message
         let decoded: Vec<_> = plaintext_res
             .iter()
-            .map(|x| (ctx.signed_decomposer.closest_representable(*x.0) / ctx.delta()))
+            .map(|x| ctx.signed_decomposer.closest_representable(*x.0) / ctx.delta())
             .collect();
 
         println!("{} {:?}", string, decoded[index]);
@@ -959,7 +959,7 @@ impl PublicKey {
     pub fn lwe_mul_encrypted_bit(&self, lwe: &LWE, bit: &LWE, ctx: &Context) -> LWE {
         let lwe_cp = lwe.clone();
         let zero = self.allocate_and_trivially_encrypt_lwe(0, ctx);
-        self.cmux(zero, lwe_cp, bit, ctx)
+        self.cmux(&zero, &lwe_cp, bit, ctx)
     }
 
     // Simulate a multiplication of an LWE by another LWE using a LUT
@@ -1651,8 +1651,8 @@ impl PublicKey {
     }
 
     // Blind select between two LWE (selector = 0 ? lwe1 : lwe2)
-    pub fn cmux(&self, lwe1: LWE, lwe2: LWE, selector: &LWE, ctx: &Context) -> LWE {
-        let vec_lwe = vec![lwe1, lwe2];
+    pub fn cmux(&self, lwe1: &LWE, lwe2: &LWE, selector: &LWE, ctx: &Context) -> LWE {
+        let vec_lwe = vec![lwe1.clone(), lwe2.clone()];
         let lut = LUT::from_vec_of_lwe(&vec_lwe, self, ctx);
         self.blind_array_access(&selector, &lut, ctx)
     }

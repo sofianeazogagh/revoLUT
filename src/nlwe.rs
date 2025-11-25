@@ -2,7 +2,7 @@ use std::ops::Index;
 
 use tfhe::core_crypto::prelude::{lwe_ciphertext_add_assign, lwe_ciphertext_sub_assign};
 
-use crate::{Context, PrivateKey, PublicKey, LUT, LWE};
+use crate::{Context, LUT, LWE, PrivateKey, PublicKey, key};
 
 /// Convert a value to a vector of n digits base p (most significant first)
 pub fn to_digits(value: u64, n: usize, p: u64) -> Vec<u64> {
@@ -244,6 +244,59 @@ impl NLWE {
     }
 }
 
+impl PublicKey {
+
+    pub fn half_adder(&self, digit: &LWE, op: &LWE, carry: &LWE, ctx: &Context) -> (LWE, LWE) {
+
+        let private_key = key(ctx.parameters);
+        let p = ctx.full_message_modulus as u64;
+        let b = self.cmux(&self.allocate_and_trivially_encrypt_lwe(0u64, ctx), op, carry, ctx);
+        
+        private_key.debug_lwe("b", &b, ctx);
+        // Identity luts
+        let lut_id = LUT::from_vec_trivially(&(0..p).collect::<Vec<_>>(), ctx);
+        // Increment lut
+        let lut_inc =
+            LUT::from_vec_trivially(&(0..p).map(|x| (x + 1) % p).collect::<Vec<_>>(), ctx);
+        // Decrement lut
+        let lut_dec =
+            LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx);
+        let new_digit = self.switch_case3(digit, &b, &vec![lut_id.clone(), lut_inc.clone(), lut_dec.clone()], ctx);
+        private_key.debug_lwe("digit", &digit, ctx);
+
+
+        let zeros = vec![0; p as usize];
+        let mut vec_last = zeros.clone();
+        vec_last[p as usize - 1] = 1;
+        let mut vec_first = zeros.clone();
+        vec_first[0] = 1;
+
+        let lut_z = LUT::from_vec_trivially(&zeros, ctx); // [0,..,0]
+        let lut_last = LUT::from_vec_trivially(&vec_last, ctx); // [0,..,0,1]
+        let lut_first = LUT::from_vec_trivially(&vec_first, ctx); // [1,0,..,0]
+
+        let new_carry = self.switch_case3(&digit, &b, &vec![lut_z.clone(), lut_last.clone(), lut_first.clone()], ctx);
+        private_key.debug_lwe("carry", &new_carry, ctx);
+        (new_digit, new_carry)
+    }
+
+
+    pub fn nlwe_maybe_inc_or_dec(&self, a: &NLWE, b: &LWE, ctx: &Context) -> NLWE {
+        let mut carry = self.allocate_and_trivially_encrypt_lwe(1u64, ctx);
+
+        let mut output = NLWE::from_plain_trivially(0, a.n(), ctx, self);
+        for (i, digit) in a.digits.iter().rev().enumerate() {
+            let idx = a.n() - 1 - i;
+            println!("i: {}", idx);
+            (output.digits[idx], carry) = self.half_adder(digit, b, &carry, ctx);
+        }
+        output
+
+
+            
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{key, nlwe::*};
@@ -344,5 +397,29 @@ mod tests {
             println!("{i}: got {actual} expected {expected} elapsed {elapsed:?}",);
             assert_eq!(actual, expected);
         }
+    }
+    #[test]
+    fn test_nlwe_maybe_inc_or_dec() {
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let public_key = &private_key.public_key;
+
+        let a = 0x110;
+        let b = 2;
+
+        let enc_a = NLWE::from_plain(a, 3, &mut ctx, private_key);
+        let enc_b = private_key.allocate_and_encrypt_lwe(b, &mut ctx);
+
+        let start = Instant::now();
+        let c = public_key.nlwe_maybe_inc_or_dec(&enc_a, &enc_b, &ctx);
+
+        let actual = c.to_plain(&ctx, private_key);
+        println!(
+            "elapsed {:?}, a: {:03X}, b: {:02X}, actual: {:03X}",
+            Instant::now() - start,
+            a as u64,
+            b as u64,
+            actual as u64
+        );
     }
 }
