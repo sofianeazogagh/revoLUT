@@ -442,49 +442,20 @@ impl PublicKey {
 
     pub fn byte_lwe_maybe_inc_or_dec(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
         let p = ctx.full_message_modulus as u64;
-
-        // First round of switch case
-        // Identity luts
-        // let lut_id = LUT::from_vec_trivially(&(0..p).collect::<Vec<_>>(), ctx);
-        // // Increment lut
-        // let lut_inc =
-        //     LUT::from_vec_trivially(&(0..p).map(|x| (x + 1) % p).collect::<Vec<_>>(), ctx);
-        // // Decrement lut
-        // let lut_dec =
-        //     LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx);
-
-         // let lo = self.switch_case3(
-        //     &a.lo,
-        //     &b,
-        //     &vec![lut_id.clone(), lut_inc.clone(), lut_dec.clone()],
-        //     ctx,
-        // );
-
+        
         let id = (0..p).collect::<Vec<_>>();
         let inc = (0..p).map(|x| (x + 1) % p).collect::<Vec<_>>();
         let dec = (0..p).map(|x| (x - 1) % p).collect::<Vec<_>>();
 
-
-        let lo = self.blind_matrix_access_clear(&vec![id.clone(), inc.clone(), dec.clone()],  &b, &a.lo, ctx);
-
-
-        // Second round of switch case
-        // Instanciate the luts
         let zeros = vec![0; p as usize];
         let mut vec_last = zeros.clone();
         vec_last[p as usize - 1] = 1;
         let mut vec_first = zeros.clone();
         vec_first[0] = 2;
 
-        // let lut_z = LUT::from_vec_trivially(&zeros, ctx); // [0,..,0]
-        // let lut_last = LUT::from_vec_trivially(&vec_last, ctx); // [0,..,0,1]
-        // let lut_first = LUT::from_vec_trivially(&vec_first, ctx); // [2,0,..,0]
 
-        // let s = self.switch_case3(&a.lo, &b, &vec![lut_z, lut_last, lut_first], ctx);
+        let lo = self.blind_matrix_access_clear(&vec![id.clone(), inc.clone(), dec.clone()],  &b, &a.lo, ctx);
         let s = self.blind_matrix_access_clear(&vec![zeros, vec_last, vec_first], &b, &a.lo, ctx);
-
-        // Third round of switch case
-        // let hi = self.switch_case3(&a.hi, &s, &vec![lut_id, lut_inc, lut_dec], ctx);
         let hi = self.blind_matrix_access_clear(&vec![id, inc, dec], &s, &a.hi, ctx);
 
         ByteLWE { lo, hi }

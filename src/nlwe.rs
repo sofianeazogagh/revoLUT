@@ -2,7 +2,7 @@ use std::ops::Index;
 
 use tfhe::core_crypto::prelude::{lwe_ciphertext_add_assign, lwe_ciphertext_sub_assign};
 
-use crate::{Context, LUT, LWE, PrivateKey, PublicKey, key};
+use crate::{Context, LUT, LWE, PrivateKey, PublicKey};
 
 /// Convert a value to a vector of n digits base p (most significant first)
 pub fn to_digits(value: u64, n: usize, p: u64) -> Vec<u64> {
