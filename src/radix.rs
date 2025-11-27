@@ -396,7 +396,8 @@ impl PublicKey {
         ByteLWE { lo, hi }
     }
 
-    pub fn byte_lwe_maybe_inc_or_dec(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
+
+    pub fn byte_lwe_maybe_inc_or_dec_old(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
         let p = ctx.full_message_modulus as u64;
 
         // First round of switch case
@@ -409,12 +410,13 @@ impl PublicKey {
         let lut_dec =
             LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx);
 
-        let lo = self.switch_case3(
+         let lo = self.switch_case3(
             &a.lo,
             &b,
             &vec![lut_id.clone(), lut_inc.clone(), lut_dec.clone()],
             ctx,
         );
+
 
         // Second round of switch case
         // Instanciate the luts
@@ -436,22 +438,35 @@ impl PublicKey {
         ByteLWE { lo, hi }
     }
 
-    // FIXME : this is not working
-    pub fn dirty_byte_lwe_maybe_inc_or_dec(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
+
+
+    pub fn byte_lwe_maybe_inc_or_dec(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
         let p = ctx.full_message_modulus as u64;
 
         // First round of switch case
         // Identity luts
-        let lut_id = LUT::from_vec_trivially(&(0..p).collect::<Vec<_>>(), ctx);
-        // Increment lut
-        let lut_inc =
-            LUT::from_vec_trivially(&(0..p).map(|x| (x + 1) % p).collect::<Vec<_>>(), ctx);
-        // Decrement lut
-        let lut_dec =
-            LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx);
+        // let lut_id = LUT::from_vec_trivially(&(0..p).collect::<Vec<_>>(), ctx);
+        // // Increment lut
+        // let lut_inc =
+        //     LUT::from_vec_trivially(&(0..p).map(|x| (x + 1) % p).collect::<Vec<_>>(), ctx);
+        // // Decrement lut
+        // let lut_dec =
+        //     LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx);
 
-        let mut lo = a.lo.clone();
-        lwe_ciphertext_add_assign(&mut lo, &b);
+         // let lo = self.switch_case3(
+        //     &a.lo,
+        //     &b,
+        //     &vec![lut_id.clone(), lut_inc.clone(), lut_dec.clone()],
+        //     ctx,
+        // );
+
+        let id = (0..p).collect::<Vec<_>>();
+        let inc = (0..p).map(|x| (x + 1) % p).collect::<Vec<_>>();
+        let dec = (0..p).map(|x| (x - 1) % p).collect::<Vec<_>>();
+
+
+        let lo = self.blind_matrix_access_clear(&vec![id.clone(), inc.clone(), dec.clone()],  &b, &a.lo, ctx);
+
 
         // Second round of switch case
         // Instanciate the luts
@@ -459,24 +474,18 @@ impl PublicKey {
         let mut vec_last = zeros.clone();
         vec_last[p as usize - 1] = 1;
         let mut vec_first = zeros.clone();
-        vec_first[0] = p - 1;
+        vec_first[0] = 2;
 
-        let lut_z = LUT::from_vec_trivially(&zeros, ctx); // [0,..,0]
-        let lut_last = LUT::from_vec_trivially(&vec_last, ctx); // [0,..,0,1]
-        let lut_first = LUT::from_vec_trivially(&vec_first, ctx); // [F,0,..,0]
+        // let lut_z = LUT::from_vec_trivially(&zeros, ctx); // [0,..,0]
+        // let lut_last = LUT::from_vec_trivially(&vec_last, ctx); // [0,..,0,1]
+        // let lut_first = LUT::from_vec_trivially(&vec_first, ctx); // [2,0,..,0]
 
-        let mut luts = vec![lut_z.clone(), lut_last.clone()];
-        luts.extend(vec![lut_z.clone(); (p - 3) as usize]);
-        luts.push(lut_first.clone());
-        assert_eq!(luts.len(), p as usize);
-        let s = self.switch_case3(&a.lo, &b, &luts, ctx);
+        // let s = self.switch_case3(&a.lo, &b, &vec![lut_z, lut_last, lut_first], ctx);
+        let s = self.blind_matrix_access_clear(&vec![zeros, vec_last, vec_first], &b, &a.lo, ctx);
 
         // Third round of switch case
-        let mut luts = vec![lut_id.clone(), lut_inc.clone()];
-        luts.extend(vec![lut_z.clone(); (p - 3) as usize]);
-        luts.push(lut_dec.clone());
-        assert_eq!(luts.len(), p as usize);
-        let hi = self.switch_case3(&a.hi, &s, &luts, ctx);
+        // let hi = self.switch_case3(&a.hi, &s, &vec![lut_id, lut_inc, lut_dec], ctx);
+        let hi = self.blind_matrix_access_clear(&vec![id, inc, dec], &s, &a.hi, ctx);
 
         ByteLWE { lo, hi }
     }
@@ -966,21 +975,5 @@ mod test {
             b as u64,
             actual
         );
-    }
-
-    #[test]
-    fn test_dirty_byte_lwe_maybe_inc_or_dec() {
-        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
-        let private_key = key(ctx.parameters);
-        let public_key = &private_key.public_key;
-
-        let a = 0x20;
-        let b = 0x0F;
-
-        let enc_a = ByteLWE::from_byte(a, &mut ctx, private_key);
-        let enc_b = private_key.allocate_and_encrypt_lwe(b, &mut ctx);
-
-        let c = public_key.dirty_byte_lwe_maybe_inc_or_dec(&enc_a, &enc_b, &ctx);
-        println!("c: {:02X}", c.to_byte(&ctx, private_key));
     }
 }

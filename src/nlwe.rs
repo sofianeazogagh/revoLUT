@@ -247,24 +247,17 @@ impl NLWE {
 impl PublicKey {
 
     pub fn half_adder(&self, digit: &LWE, op: &LWE, carry: &LWE, ctx: &Context) -> (LWE, LWE) {
-
-        let private_key = key(ctx.parameters);
         let p = ctx.full_message_modulus as u64;
+        // 1 Rot + 1ks
         let b = self.cmux(&self.allocate_and_trivially_encrypt_lwe(0u64, ctx), op, carry, ctx);
-        
-        private_key.debug_lwe("b", &b, ctx);
-        // Identity luts
-        let lut_id = LUT::from_vec_trivially(&(0..p).collect::<Vec<_>>(), ctx);
-        // Increment lut
+
+        // Instantiate the luts
+        let lut_id = LUT::from_vec_trivially(&(0..p).collect::<Vec<_>>(), ctx); // [0,..,p-1]
         let lut_inc =
-            LUT::from_vec_trivially(&(0..p).map(|x| (x + 1) % p).collect::<Vec<_>>(), ctx);
-        // Decrement lut
+            LUT::from_vec_trivially(&(0..p).map(|x| (x + 1) % p).collect::<Vec<_>>(), ctx); // [1,..,p-1,0]
         let lut_dec =
-            LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx);
-        let new_digit = self.switch_case3(digit, &b, &vec![lut_id.clone(), lut_inc.clone(), lut_dec.clone()], ctx);
-        private_key.debug_lwe("digit", &digit, ctx);
-
-
+            LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx); // [p-1,..,1,0]
+        
         let zeros = vec![0; p as usize];
         let mut vec_last = zeros.clone();
         vec_last[p as usize - 1] = 1;
@@ -275,8 +268,10 @@ impl PublicKey {
         let lut_last = LUT::from_vec_trivially(&vec_last, ctx); // [0,..,0,1]
         let lut_first = LUT::from_vec_trivially(&vec_first, ctx); // [1,0,..,0]
 
+        // 4 Rot + 1ks
+        let new_digit = self.switch_case3(digit, &b, &vec![lut_id.clone(), lut_inc.clone(), lut_dec.clone()], ctx);
+        // 4 Rot + 1ks
         let new_carry = self.switch_case3(&digit, &b, &vec![lut_z.clone(), lut_last.clone(), lut_first.clone()], ctx);
-        private_key.debug_lwe("carry", &new_carry, ctx);
         (new_digit, new_carry)
     }
 
@@ -287,13 +282,10 @@ impl PublicKey {
         let mut output = NLWE::from_plain_trivially(0, a.n(), ctx, self);
         for (i, digit) in a.digits.iter().rev().enumerate() {
             let idx = a.n() - 1 - i;
-            println!("i: {}", idx);
+            // (9 Rot + 3ks)*n
             (output.digits[idx], carry) = self.half_adder(digit, b, &carry, ctx);
         }
         output
-
-
-            
     }
 }
 
@@ -404,7 +396,7 @@ mod tests {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let a = 0x110;
+        let a = 0xFFF;
         let b = 2;
 
         let enc_a = NLWE::from_plain(a, 3, &mut ctx, private_key);
@@ -415,7 +407,7 @@ mod tests {
 
         let actual = c.to_plain(&ctx, private_key);
         println!(
-            "elapsed {:?}, a: {:03X}, b: {:02X}, actual: {:03X}",
+            "elapsed {:?}, a: {:03X}, b: {:01X}, actual: {:03X}",
             Instant::now() - start,
             a as u64,
             b as u64,
