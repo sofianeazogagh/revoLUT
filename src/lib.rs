@@ -1036,7 +1036,7 @@ impl PublicKey {
         ct1.as_mut()
             .iter_mut()
             .zip(ct2.as_ref().iter())
-            .for_each(|(dst, &rhs)| *dst += rhs);
+            .for_each(|(dst, &rhs)| *dst = dst.wrapping_add(rhs));
     }
 
     pub fn glwe_sum_polynomial(&self, glwe: &GLWE, poly: &Poly, ctx: &Context) -> GLWE {
