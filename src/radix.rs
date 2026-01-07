@@ -396,7 +396,6 @@ impl PublicKey {
         ByteLWE { lo, hi }
     }
 
-
     pub fn byte_lwe_maybe_inc_or_dec_old(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
         let p = ctx.full_message_modulus as u64;
 
@@ -410,13 +409,12 @@ impl PublicKey {
         let lut_dec =
             LUT::from_vec_trivially(&(0..p).map(|x| (x - 1) % p).collect::<Vec<_>>(), ctx);
 
-         let lo = self.switch_case3(
+        let lo = self.switch_case3(
             &a.lo,
             &b,
             &vec![lut_id.clone(), lut_inc.clone(), lut_dec.clone()],
             ctx,
         );
-
 
         // Second round of switch case
         // Instanciate the luts
@@ -438,11 +436,9 @@ impl PublicKey {
         ByteLWE { lo, hi }
     }
 
-
-
     pub fn byte_lwe_maybe_inc_or_dec(&self, a: &ByteLWE, b: &LWE, ctx: &Context) -> ByteLWE {
         let p = ctx.full_message_modulus as u64;
-        
+
         let id = (0..p).collect::<Vec<_>>();
         let inc = (0..p).map(|x| (x + 1) % p).collect::<Vec<_>>();
         let dec = (0..p).map(|x| (x - 1) % p).collect::<Vec<_>>();
@@ -453,8 +449,12 @@ impl PublicKey {
         let mut vec_first = zeros.clone();
         vec_first[0] = 2;
 
-
-        let lo = self.blind_matrix_access_clear(&vec![id.clone(), inc.clone(), dec.clone()],  &b, &a.lo, ctx);
+        let lo = self.blind_matrix_access_clear(
+            &vec![id.clone(), inc.clone(), dec.clone()],
+            &b,
+            &a.lo,
+            ctx,
+        );
         let s = self.blind_matrix_access_clear(&vec![zeros, vec_last, vec_first], &b, &a.lo, ctx);
         let hi = self.blind_matrix_access_clear(&vec![id, inc, dec], &s, &a.hi, ctx);
 
