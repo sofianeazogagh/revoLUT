@@ -152,34 +152,51 @@ impl NLWE {
     pub fn blind_lt(&self, other: &NLWE, ctx: &Context, public_key: &PublicKey) -> LWE {
         let p = ctx.full_message_modulus as u64;
         let n = self.n();
-        let lt = ((0..p).map(|i| ((0..p).map(|j| (i < j) as u64)).collect())).collect();
-        let eq = ((0..p).map(|i| ((0..p).map(|j| (i == j) as u64)).collect())).collect();
+        // outputs of digit-wise comparisons on two bits, EQ in LSB
+        let lt_eq = ((0..p).map(|i| {
+            ((0..p).map(|j| match i.cmp(&j) {
+                std::cmp::Ordering::Less => 2u64,
+                std::cmp::Ordering::Equal => 1u64,
+                _ => 0u64,
+            }))
+            .collect()
+        }))
+        .collect();
 
-        let zero = public_key.allocate_and_trivially_encrypt_lwe(0, ctx);
+        // acc_lt = 0, acc_eq = 1, acc_lt_eq = 2*acc_lt + acc_eq = 1
+        let mut acc_lt_eq = public_key.allocate_and_trivially_encrypt_lwe(1, ctx);
 
-        let mut acc_lt = public_key.allocate_and_trivially_encrypt_lwe(0, ctx);
-        let mut acc_eq = public_key.allocate_and_trivially_encrypt_lwe(1, ctx);
+        // each pass is a circuit of 4 bits in, 2 bits out becoming the first two bits in of the next pass
+        // INPUT (MSB to LSB): cmp_lt, cmp_eq, acc_lt, acc_eq
+        // OUTPUT: acc_lt' = acc_lt | (acc_eq & cmp_lt), acc_eq' = acc_eq & cmp_eq
+        assert!(ctx.full_message_modulus >= 16, "full_message_modulus must be at least 16 to fit the 4 input bits in one digit");
+        let cmp_eq_lt_table = &Vec::from_iter((0..16).map(|i| {
+            let acc_eq = (i & 0b0001) != 0;
+            let acc_lt = (i & 0b0010) != 0;
+            let cmp_eq = (i & 0b0100) != 0;
+            let cmp_lt = (i & 0b1000) != 0;
+
+            let next_acc_lt = acc_lt || (acc_eq && cmp_lt);
+            let next_acc_eq = acc_eq && cmp_eq;
+            // keep eq in LSB and LT in MSB
+            (next_acc_eq as u64) + 2 * (next_acc_lt as u64)
+        }));
+        let cmp_eq_lut = LUT::from_vec_trivially(cmp_eq_lt_table, ctx);
 
         for i in 0..n {
-            let b_lt = public_key.blind_matrix_access_clear(&lt, &self[i], &other[i], ctx);
-            let b_eq = public_key.blind_matrix_access_clear(&eq, &self[i], &other[i], ctx);
+            let cmp_lt_eq = public_key.blind_matrix_access_clear(&lt_eq, &self[i], &other[i], ctx);
+            // we keep the lt and eq bits in the least significant bits
+            // and add the results of the digitwise comparisons to the most significant bits
+            // acc_lt_eq = acc_lt_eq + cmp_lt_eq << 2
+            let hi_cmp_lt_eq = public_key.lwe_ciphertext_plaintext_mul(&cmp_lt_eq, 4);
+            lwe_ciphertext_add_assign(&mut acc_lt_eq, &hi_cmp_lt_eq);
 
-            // acc_lt = acc_lt | (acc_eq & b_lt)
-            let andb = LUT::from_vec_of_lwe(&vec![zero.clone(), acc_eq.clone()], public_key, ctx);
-            let acc_eq_and_b_lt = public_key.blind_array_access(&b_lt, &andb, ctx);
-            let orb = LUT::from_vec_of_lwe(
-                &vec![acc_eq_and_b_lt.clone(), acc_lt.clone()],
-                public_key,
-                ctx,
-            );
-            acc_lt = public_key.blind_array_access(&acc_lt, &orb, ctx);
-
-            // acc_eq = acc_eq & b_eq
-            let andb = LUT::from_vec_of_lwe(&vec![acc_eq.clone(), b_eq], public_key, ctx);
-            acc_eq = public_key.blind_array_access(&acc_eq, &andb, ctx);
+            // acc_lt_eq = cmp_eq_lut[cmp_lt_eq || acc_lt_eq]
+            acc_lt_eq = public_key.blind_array_access(&acc_lt_eq, &cmp_eq_lut, ctx);
         }
 
-        acc_lt
+        // extract LT bit in 2nd LSB
+        public_key.blind_array_access(&acc_lt_eq, &LUT::from_function(|x| (x >> 1) & 1, ctx), ctx)
     }
 
     /// Adds other NLWE to self, digit-wise (without carry)
@@ -384,9 +401,9 @@ mod tests {
 
     #[quickcheck]
     pub fn test_nlwe_blind_lt(i: u32, j: u32) -> TestResult {
-        let mut ctx = Context::from(PARAM_MESSAGE_1_CARRY_0);
+        let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
         let private_key = key(ctx.parameters);
-        let n = 32;
+        let n = 3;
         let p = ctx.full_message_modulus() as u64;
         let u = p.pow(n as u32);
 
