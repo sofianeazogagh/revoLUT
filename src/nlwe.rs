@@ -148,6 +148,40 @@ impl NLWE {
         output
     }
 
+    /// Compare self and other, returning an LWE encrypting 1 if self < other, else 0
+    pub fn blind_lt(&self, other: &NLWE, ctx: &Context, public_key: &PublicKey) -> LWE {
+        let p = ctx.full_message_modulus as u64;
+        let n = self.n();
+        let lt = ((0..p).map(|i| ((0..p).map(|j| (i < j) as u64)).collect())).collect();
+        let eq = ((0..p).map(|i| ((0..p).map(|j| (i == j) as u64)).collect())).collect();
+
+        let zero = public_key.allocate_and_trivially_encrypt_lwe(0, ctx);
+
+        let mut acc_lt = public_key.allocate_and_trivially_encrypt_lwe(0, ctx);
+        let mut acc_eq = public_key.allocate_and_trivially_encrypt_lwe(1, ctx);
+
+        for i in 0..n {
+            let b_lt = public_key.blind_matrix_access_clear(&lt, &self[i], &other[i], ctx);
+            let b_eq = public_key.blind_matrix_access_clear(&eq, &self[i], &other[i], ctx);
+
+            // acc_lt = acc_lt | (acc_eq & b_lt)
+            let andb = LUT::from_vec_of_lwe(&vec![zero.clone(), acc_eq.clone()], public_key, ctx);
+            let acc_eq_and_b_lt = public_key.blind_array_access(&b_lt, &andb, ctx);
+            let orb = LUT::from_vec_of_lwe(
+                &vec![acc_eq_and_b_lt.clone(), acc_lt.clone()],
+                public_key,
+                ctx,
+            );
+            acc_lt = public_key.blind_array_access(&acc_lt, &orb, ctx);
+
+            // acc_eq = acc_eq & b_eq
+            let andb = LUT::from_vec_of_lwe(&vec![acc_eq.clone(), b_eq], public_key, ctx);
+            acc_eq = public_key.blind_array_access(&acc_eq, &andb, ctx);
+        }
+
+        acc_lt
+    }
+
     /// Adds other NLWE to self, digit-wise (without carry)
     pub fn add_digitwise_overflow(&self, other: &NLWE) -> NLWE {
         NLWE {
@@ -346,6 +380,31 @@ mod tests {
         );
         let dc = c.to_plain(&ctx, &private_key);
         TestResult::from_bool(dc == (i as u64 + j as u64) % size)
+    }
+
+    #[quickcheck]
+    pub fn test_nlwe_blind_lt(i: u32, j: u32) -> TestResult {
+        let mut ctx = Context::from(PARAM_MESSAGE_1_CARRY_0);
+        let private_key = key(ctx.parameters);
+        let n = 32;
+        let p = ctx.full_message_modulus() as u64;
+        let u = p.pow(n as u32);
+
+        let a = NLWE::from_plain(i as u64 % u, n, &mut ctx, &private_key);
+        let b = NLWE::from_plain(j as u64 % u, n, &mut ctx, &private_key);
+        let start = Instant::now();
+        let c = a.blind_lt(&b, &ctx, &private_key.public_key);
+        let elapsed = Instant::now() - start;
+        println!(
+            "{:?} < {:?} = {:?} ({:?})",
+            to_digits(i as u64, n, ctx.full_message_modulus as u64),
+            to_digits(j as u64, n, ctx.full_message_modulus as u64),
+            private_key.decrypt_lwe(&c, &ctx),
+            elapsed
+        );
+        TestResult::from_bool(
+            private_key.decrypt_lwe(&c, &ctx) == ((i as u64 % u) < (j as u64 % u)) as u64,
+        )
     }
 
     #[test]
