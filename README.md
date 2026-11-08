@@ -37,3 +37,7 @@ Some benchmarks are present in the `benches` folder, especially for the differen
 ```bash
 cargo bench --bench BENCH_NAME
 ```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
