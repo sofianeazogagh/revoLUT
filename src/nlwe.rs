@@ -290,10 +290,10 @@ impl PublicKey {
 
 #[cfg(test)]
 mod tests {
+    use crate::params::*;
     use crate::{key, nlwe::*};
     use quickcheck::TestResult;
     use std::time::Instant;
-    use tfhe::shortint::parameters::*;
 
     #[test]
     pub fn test_to_digits() {

@@ -641,8 +641,8 @@ impl PublicKey {
 mod test {
     use std::{time::Instant, u8};
 
+    use crate::params::PARAM_MESSAGE_4_CARRY_0;
     use quickcheck::TestResult;
-    use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
     use crate::key;
 

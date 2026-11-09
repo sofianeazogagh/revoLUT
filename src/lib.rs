@@ -20,10 +20,10 @@ use tfhe::shortint::parameters::ClassicPBSParameters;
 use tfhe::shortint::prelude::CiphertextModulus;
 
 // Fast Fourier Transform
-use concrete_fft::c64;
-use dyn_stack::{GlobalPodBuffer, PodStack, ReborrowMut};
+use dyn_stack::{PodBuffer, PodStack};
 use tfhe::core_crypto::entities::FourierPolynomial;
 use tfhe::core_crypto::fft_impl::fft64::math::fft::FftView;
+use tfhe_fft::c64;
 
 use rand::Rng;
 
@@ -34,12 +34,220 @@ pub mod nlwe;
 pub mod packed_lut;
 pub mod radix;
 
+/// The `PARAM_MESSAGE_X_CARRY_0` parameter sets of tfhe 0.6.4, which tfhe 1.x no longer exports.
+///
+/// Values are copied verbatim from tfhe 0.6.4 (p_fail ~ 2^-40) so that results and timings stay
+/// comparable with those obtained before the tfhe 1.x migration. `ModulusSwitchType::Standard`
+/// is the plain rounding modulus switch that tfhe 0.6 performed inside the blind rotation.
+pub mod params {
+    use tfhe::shortint::parameters::{
+        CarryModulus, CiphertextModulus, ClassicPBSParameters, DecompositionBaseLog,
+        DecompositionLevelCount, DynamicDistribution, EncryptionKeyChoice, GlweDimension,
+        LweDimension, MaxNoiseLevel, MessageModulus, ModulusSwitchType, PolynomialSize,
+        StandardDev,
+    };
+
+    pub const PARAM_MESSAGE_1_CARRY_0: ClassicPBSParameters = ClassicPBSParameters {
+        lwe_dimension: LweDimension(695),
+        glwe_dimension: GlweDimension(5),
+        polynomial_size: PolynomialSize(256),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.1503288827085764e-5,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            4.449096324925789e-10,
+        )),
+        pbs_base_log: DecompositionBaseLog(15),
+        pbs_level: DecompositionLevelCount(1),
+        ks_base_log: DecompositionBaseLog(5),
+        ks_level: DecompositionLevelCount(2),
+        message_modulus: MessageModulus(2),
+        carry_modulus: CarryModulus(1),
+        max_noise_level: MaxNoiseLevel::new(1),
+        log2_p_fail: -40.126,
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+        modulus_switch_noise_reduction_params: ModulusSwitchType::Standard,
+    };
+
+    pub const PARAM_MESSAGE_2_CARRY_0: ClassicPBSParameters = ClassicPBSParameters {
+        lwe_dimension: LweDimension(699),
+        glwe_dimension: GlweDimension(3),
+        polynomial_size: PolynomialSize(512),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            1.9974501253932986e-5,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            3.966608917163306e-12,
+        )),
+        pbs_base_log: DecompositionBaseLog(18),
+        pbs_level: DecompositionLevelCount(1),
+        ks_base_log: DecompositionBaseLog(4),
+        ks_level: DecompositionLevelCount(3),
+        message_modulus: MessageModulus(4),
+        carry_modulus: CarryModulus(1),
+        max_noise_level: MaxNoiseLevel::new(1),
+        log2_p_fail: -40.147,
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+        modulus_switch_noise_reduction_params: ModulusSwitchType::Standard,
+    };
+
+    pub const PARAM_MESSAGE_3_CARRY_0: ClassicPBSParameters = ClassicPBSParameters {
+        lwe_dimension: LweDimension(759),
+        glwe_dimension: GlweDimension(2),
+        polynomial_size: PolynomialSize(1024),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            6.607570143466592e-6,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            3.1529322391500584e-16,
+        )),
+        pbs_base_log: DecompositionBaseLog(23),
+        pbs_level: DecompositionLevelCount(1),
+        ks_base_log: DecompositionBaseLog(4),
+        ks_level: DecompositionLevelCount(3),
+        message_modulus: MessageModulus(8),
+        carry_modulus: CarryModulus(1),
+        max_noise_level: MaxNoiseLevel::new(1),
+        log2_p_fail: -40.102,
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+        modulus_switch_noise_reduction_params: ModulusSwitchType::Standard,
+    };
+
+    pub const PARAM_MESSAGE_4_CARRY_0: ClassicPBSParameters = ClassicPBSParameters {
+        lwe_dimension: LweDimension(761),
+        glwe_dimension: GlweDimension(1),
+        polynomial_size: PolynomialSize(2048),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            6.36835566258815e-6,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            3.1529322391500584e-16,
+        )),
+        pbs_base_log: DecompositionBaseLog(23),
+        pbs_level: DecompositionLevelCount(1),
+        ks_base_log: DecompositionBaseLog(3),
+        ks_level: DecompositionLevelCount(5),
+        message_modulus: MessageModulus(16),
+        carry_modulus: CarryModulus(1),
+        max_noise_level: MaxNoiseLevel::new(1),
+        log2_p_fail: -40.315,
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+        modulus_switch_noise_reduction_params: ModulusSwitchType::Standard,
+    };
+
+    pub const PARAM_MESSAGE_5_CARRY_0: ClassicPBSParameters = ClassicPBSParameters {
+        lwe_dimension: LweDimension(849),
+        glwe_dimension: GlweDimension(1),
+        polynomial_size: PolynomialSize(4096),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            1.2571599559956785e-6,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.168404344971009e-19,
+        )),
+        pbs_base_log: DecompositionBaseLog(22),
+        pbs_level: DecompositionLevelCount(1),
+        ks_base_log: DecompositionBaseLog(4),
+        ks_level: DecompositionLevelCount(4),
+        message_modulus: MessageModulus(32),
+        carry_modulus: CarryModulus(1),
+        max_noise_level: MaxNoiseLevel::new(1),
+        log2_p_fail: -40.042,
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+        modulus_switch_noise_reduction_params: ModulusSwitchType::Standard,
+    };
+
+    pub const PARAM_MESSAGE_6_CARRY_0: ClassicPBSParameters = ClassicPBSParameters {
+        lwe_dimension: LweDimension(931),
+        glwe_dimension: GlweDimension(1),
+        polynomial_size: PolynomialSize(8192),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.77202526552345e-7,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.168404344971009e-19,
+        )),
+        pbs_base_log: DecompositionBaseLog(22),
+        pbs_level: DecompositionLevelCount(1),
+        ks_base_log: DecompositionBaseLog(4),
+        ks_level: DecompositionLevelCount(4),
+        message_modulus: MessageModulus(64),
+        carry_modulus: CarryModulus(1),
+        max_noise_level: MaxNoiseLevel::new(1),
+        log2_p_fail: -40.09,
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+        modulus_switch_noise_reduction_params: ModulusSwitchType::Standard,
+    };
+
+    pub const PARAM_MESSAGE_7_CARRY_0: ClassicPBSParameters = ClassicPBSParameters {
+        lwe_dimension: LweDimension(947),
+        glwe_dimension: GlweDimension(1),
+        polynomial_size: PolynomialSize(16384),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.0638655780656257e-7,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.168404344971009e-19,
+        )),
+        pbs_base_log: DecompositionBaseLog(15),
+        pbs_level: DecompositionLevelCount(2),
+        ks_base_log: DecompositionBaseLog(3),
+        ks_level: DecompositionLevelCount(6),
+        message_modulus: MessageModulus(128),
+        carry_modulus: CarryModulus(1),
+        max_noise_level: MaxNoiseLevel::new(1),
+        log2_p_fail: -40.038,
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+        modulus_switch_noise_reduction_params: ModulusSwitchType::Standard,
+    };
+
+    pub const PARAM_MESSAGE_8_CARRY_0: ClassicPBSParameters = ClassicPBSParameters {
+        lwe_dimension: LweDimension(1032),
+        glwe_dimension: GlweDimension(1),
+        polynomial_size: PolynomialSize(32768),
+        lwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            4.305923848218434e-8,
+        )),
+        glwe_noise_distribution: DynamicDistribution::new_gaussian_from_std_dev(StandardDev(
+            2.168404344971009e-19,
+        )),
+        pbs_base_log: DecompositionBaseLog(15),
+        pbs_level: DecompositionLevelCount(2),
+        ks_base_log: DecompositionBaseLog(4),
+        ks_level: DecompositionLevelCount(5),
+        message_modulus: MessageModulus(256),
+        carry_modulus: CarryModulus(1),
+        max_noise_level: MaxNoiseLevel::new(1),
+        log2_p_fail: -40.231,
+        ciphertext_modulus: CiphertextModulus::new_native(),
+        encryption_key_choice: EncryptionKeyChoice::Big,
+        modulus_switch_noise_reduction_params: ModulusSwitchType::Standard,
+    };
+}
+
+/// Modulus-switches an LWE ciphertext for a blind rotation with `polynomial_size`.
+/// Before tfhe 1.0, `blind_rotate_assign` did this itself.
+pub(crate) fn ms<'a>(
+    lwe: &'a LWE,
+    polynomial_size: PolynomialSize,
+) -> impl ModulusSwitchedLweCiphertext<usize> + 'a {
+    let log_modulus = polynomial_size.to_blind_rotation_input_modulus_log();
+    lwe_ciphertext_modulus_switch::<u64, usize, _>(lwe.as_view(), log_modulus)
+}
+
 pub type LWE = LweCiphertext<Vec<u64>>;
 pub type GLWE = GlweCiphertext<Vec<u64>>;
 pub type Poly = Polynomial<Vec<u64>>;
 
 pub fn random_lut(param: ClassicPBSParameters) -> LUT {
-    let size = param.message_modulus.0;
+    let size = param.message_modulus.0 as usize;
     let mut rng = rand::thread_rng();
     let array: Vec<u64> = (0..size).map(|_| rng.gen_range(0..size as u64)).collect();
     LUT::from_vec(&array, &key(param), &mut Context::from(param))
@@ -87,27 +295,22 @@ pub(crate) fn polynomial_fft_wrapping_mul<Scalar, OutputCont, LhsCont, RhsCont>(
         data: vec![c64::default(); n / 2],
     };
 
-    fft.forward_as_torus(fourier_lhs.as_mut_view(), lhs.as_view(), stack.rb_mut());
-    fft.forward_as_integer(fourier_rhs.as_mut_view(), rhs.as_view(), stack.rb_mut());
+    fft.forward_as_torus(fourier_lhs.as_mut_view(), lhs.as_view(), stack);
+    fft.forward_as_integer(fourier_rhs.as_mut_view(), rhs.as_view(), stack);
 
     for (a, b) in fourier_lhs.data.iter_mut().zip(fourier_rhs.data.iter()) {
         *a *= *b;
     }
 
-    fft.backward_as_torus(output.as_mut_view(), fourier_lhs.as_view(), stack.rb_mut());
+    fft.backward_as_torus(output.as_mut_view(), fourier_lhs.as_view(), stack);
 }
 
 // FFT initialization
-pub(crate) fn init_fft(polynomial_size: PolynomialSize) -> (Fft, GlobalPodBuffer) {
+pub(crate) fn init_fft(polynomial_size: PolynomialSize) -> (Fft, PodBuffer) {
     let fft = Fft::new(polynomial_size);
     let fft_view = fft.as_view();
 
-    let mem = GlobalPodBuffer::new(
-        fft_view
-            .forward_scratch()
-            .unwrap()
-            .and(fft_view.backward_scratch().unwrap()),
-    );
+    let mem = PodBuffer::new(fft_view.forward_scratch().and(fft_view.backward_scratch()));
 
     (fft, mem)
 }
@@ -119,8 +322,8 @@ pub struct Context {
     delta: u64,
     full_message_modulus: usize,
     pub signed_decomposer: SignedDecomposer<u64>,
-    pub encryption_generator: EncryptionRandomGenerator<ActivatedRandomGenerator>,
-    secret_generator: SecretRandomGenerator<ActivatedRandomGenerator>,
+    pub encryption_generator: EncryptionRandomGenerator<DefaultRandomGenerator>,
+    secret_generator: SecretRandomGenerator<DefaultRandomGenerator>,
     box_size: usize,
     ciphertext_modulus: CiphertextModulus,
 }
@@ -129,7 +332,8 @@ impl Context {
     pub fn from(parameters: ClassicPBSParameters) -> Context {
         let big_lwe_dimension =
             LweDimension(parameters.polynomial_size.0 * parameters.glwe_dimension.0);
-        let full_message_modulus = parameters.message_modulus.0 * parameters.carry_modulus.0;
+        let full_message_modulus =
+            (parameters.message_modulus.0 * parameters.carry_modulus.0) as usize;
         let delta = (1u64 << 63) / (full_message_modulus) as u64;
 
         //FIXME : voir a quoi correspond le +1
@@ -145,13 +349,12 @@ impl Context {
         let seeder = boxed_seeder.as_mut();
 
         // Create a generator which uses a CSPRNG to generate secret keys
-        let secret_generator =
-            SecretRandomGenerator::<ActivatedRandomGenerator>::new(seeder.seed());
+        let secret_generator = SecretRandomGenerator::<DefaultRandomGenerator>::new(seeder.seed());
 
         // Create a generator which uses two CSPRNGs to generate public masks and secret encryption
         // noise
         let encryption_generator =
-            EncryptionRandomGenerator::<ActivatedRandomGenerator>::new(seeder.seed(), seeder);
+            EncryptionRandomGenerator::<DefaultRandomGenerator>::new(seeder.seed(), seeder);
 
         let box_size = parameters.polynomial_size.0 / full_message_modulus as usize;
         let ciphertext_modulus = CiphertextModulus::new_native();
@@ -802,7 +1005,7 @@ impl PrivateKey {
             let ct_line = LUT::from_vec(line, self, &mut ctx);
             ct_matrix.push(ct_line);
         }
-        for _i in ct_matrix.len()..ctx.message_modulus().0 {
+        for _i in ct_matrix.len()..(ctx.message_modulus().0 as usize) {
             let ct_padding = LUT::from_vec(&vec![0u64], self, &mut ctx);
             ct_matrix.push(ct_padding);
         }
@@ -889,7 +1092,7 @@ impl PublicKey {
     pub fn lower_precision(&self, ct: &mut LWE, ctx: &Context, big_modulus: u64) {
         let small_delta = (1u64 << 63) / big_modulus;
 
-        let small_modulus = ctx.message_modulus().0 as u64;
+        let small_modulus = ctx.message_modulus().0;
         let precision_ratio = (1u64 << 63) / (small_delta * small_modulus);
         assert!(precision_ratio > 1);
 
@@ -1106,7 +1309,11 @@ impl PublicKey {
     /// Assign variant of `blind_rotation`
     pub fn blind_rotation_assign(&self, big_lwe: &LWE, lut: &mut LUT, ctx: &Context) {
         let small_lwe = self.allocate_and_keyswitch_lwe_ciphertext(big_lwe, ctx);
-        blind_rotate_assign(&small_lwe, &mut lut.0, &self.fourier_bsk);
+        blind_rotate_assign(
+            &ms(&small_lwe, self.fourier_bsk.polynomial_size()),
+            &mut lut.0,
+            &self.fourier_bsk,
+        );
     }
 
     /// Get an element of an `array` given its `index`
@@ -1313,7 +1520,11 @@ impl PublicKey {
                 self.allocate_and_trivially_encrypt_lwe(ctx.full_message_modulus() as u64, &ctx);
             lwe_ciphertext_sub_assign(&mut rotation, &index); // rotation = 16 - index = - index
                                                               // let rotation = self.neg_lwe(&index, &ctx);
-            blind_rotate_assign(&rotation, &mut lut.0, &self.fourier_bsk);
+            blind_rotate_assign(
+                &ms(&rotation, self.fourier_bsk.polynomial_size()),
+                &mut lut.0,
+                &self.fourier_bsk,
+            );
             lut.print(private_key, ctx);
         }
 
@@ -1413,7 +1624,11 @@ impl PublicKey {
 
         // Delete the retrieved element from the lut
         // get the element wanted
-        blind_rotate_assign(&index_retrieve, &mut lut.0, &self.fourier_bsk);
+        blind_rotate_assign(
+            &ms(&index_retrieve, self.fourier_bsk.polynomial_size()),
+            &mut lut.0,
+            &self.fourier_bsk,
+        );
         extract_lwe_sample_from_glwe_ciphertext(&lut.0, &mut big_lwe, MonomialDegree(0));
         keyswitch_lwe_ciphertext(&self.lwe_ksk, &big_lwe, &mut lwe_retrieve);
 
@@ -1421,7 +1636,11 @@ impl PublicKey {
         let mut lut_sum = LUT(self.glwe_sum(&lut.0, &lut_retrieve.0));
         // rerotate the lut
         let neg_index_retrieve = self.neg_lwe(&index_retrieve, &*ctx);
-        blind_rotate_assign(&neg_index_retrieve, &mut lut_sum.0, &self.fourier_bsk);
+        blind_rotate_assign(
+            &ms(&neg_index_retrieve, self.fourier_bsk.polynomial_size()),
+            &mut lut_sum.0,
+            &self.fourier_bsk,
+        );
 
         // One LUT to many LUT
         let mut many_lut = lut_sum.to_many_lut(self, &*ctx);
@@ -1444,7 +1663,11 @@ impl PublicKey {
         // Multi Blind Rotate
         for (lut, index) in many_lut.iter_mut().zip(new_index.iter()) {
             let rotation = self.neg_lwe(&index, &ctx);
-            blind_rotate_assign(&rotation, &mut lut.0, &self.fourier_bsk);
+            blind_rotate_assign(
+                &ms(&rotation, self.fourier_bsk.polynomial_size()),
+                &mut lut.0,
+                &self.fourier_bsk,
+            );
         }
 
         // Sum all the rotated glwe to get the final glwe retrieved
@@ -1482,7 +1705,11 @@ impl PublicKey {
         lwe_ciphertext_sub(&mut rotation, &lut_stack.number_of_elements, &lwe_one);
 
         // rotate and extract to delete
-        blind_rotate_assign(&rotation, &mut lut_stack.lut.0, &self.fourier_bsk);
+        blind_rotate_assign(
+            &ms(&rotation, self.fourier_bsk.polynomial_size()),
+            &mut lut_stack.lut.0,
+            &self.fourier_bsk,
+        );
         extract_lwe_sample_from_glwe_ciphertext(
             &lut_stack.lut.0,
             &mut lwe_pop_not_switched,
@@ -1494,7 +1721,11 @@ impl PublicKey {
         let lut_used_to_delete = LUT::from_lwe(&lwe_pop, &self, &ctx);
         self.glwe_sum_assign(&mut lut_stack.lut.0, &lut_used_to_delete.0);
         self.wrapping_neg_lwe(&mut rotation);
-        blind_rotate_assign(&rotation, &mut lut_stack.lut.0, &self.fourier_bsk);
+        blind_rotate_assign(
+            &ms(&rotation, self.fourier_bsk.polynomial_size()),
+            &mut lut_stack.lut.0,
+            &self.fourier_bsk,
+        );
 
         // udpating the number of element
         lwe_ciphertext_sub_assign(&mut lut_stack.number_of_elements, &lwe_one);
@@ -1512,7 +1743,11 @@ impl PublicKey {
 
         lwe_ciphertext_sub_assign(&mut rotation, &stack_len);
         // rotation = 16 - index_to_push = - index_to_push
-        blind_rotate_assign(&rotation, &mut to_push.0, &self.fourier_bsk);
+        blind_rotate_assign(
+            &ms(&rotation, self.fourier_bsk.polynomial_size()),
+            &mut to_push.0,
+            &self.fourier_bsk,
+        );
 
         // Sum all the rotated glwe to get the final glwe permuted
         self.glwe_sum_assign(&mut lut_stack.lut.0, &to_push.0);
@@ -2032,7 +2267,7 @@ impl LUT {
     }
 
     pub fn print(&self, private_key: &PrivateKey, ctx: &Context) {
-        let output_vec = (0..ctx.message_modulus().0)
+        let output_vec = (0..(ctx.message_modulus().0 as usize))
             .map(|i| {
                 let ct_big = private_key.public_key.lut_extract(&self, i, ctx);
                 private_key.decrypt_lwe(&ct_big, &ctx)
@@ -2160,7 +2395,7 @@ impl LUTStack {
     }
 
     pub fn print(&self, private_key: &PrivateKey, ctx: &Context) {
-        let box_size = ctx.polynomial_size().0 / ctx.message_modulus().0;
+        let box_size = ctx.polynomial_size().0 / (ctx.message_modulus().0 as usize);
 
         // Create the accumulator
         let mut input_vec = Vec::new();
@@ -2170,7 +2405,7 @@ impl LUTStack {
             ctx.ciphertext_modulus(),
         );
 
-        for i in 0..ctx.message_modulus().0 {
+        for i in 0..(ctx.message_modulus().0 as usize) {
             //many_lwe.len()
             let index = i * box_size;
             extract_lwe_sample_from_glwe_ciphertext(
@@ -2196,10 +2431,10 @@ mod test {
     use std::time::Instant;
 
     use super::*;
+    use crate::params::*;
     use itertools::Itertools;
     use quickcheck::TestResult;
     use rand::seq::SliceRandom;
-    use tfhe::shortint::parameters::*;
 
     #[test]
     fn test_lwe_add() {
@@ -2232,9 +2467,9 @@ mod test {
         let mut seeder = new_seeder();
         let seeder = seeder.as_mut();
         let mut encryption_generator =
-            EncryptionRandomGenerator::<ActivatedRandomGenerator>::new(seeder.seed(), seeder);
+            EncryptionRandomGenerator::<DefaultRandomGenerator>::new(seeder.seed(), seeder);
         let mut secret_generator =
-            SecretRandomGenerator::<ActivatedRandomGenerator>::new(seeder.seed());
+            SecretRandomGenerator::<DefaultRandomGenerator>::new(seeder.seed());
 
         // Create the LweSecretKey
         let lwe_secret_key =
@@ -2517,7 +2752,11 @@ mod test {
         // blind rotation
         lut.print(&private_key, &ctx);
         let begin = Instant::now();
-        blind_rotate_assign(&lwe_rotation_amount, &mut lut.0, &public_key.fourier_bsk);
+        blind_rotate_assign(
+            &ms(&switched, public_key.fourier_bsk.polynomial_size()),
+            &mut lut.0,
+            &public_key.fourier_bsk,
+        );
         let elapsed = Instant::now() - begin;
         println!("rotated ({:?}): ", elapsed);
         lut.print(&private_key, &ctx);
@@ -2600,7 +2839,7 @@ mod test {
 
     fn blind_array_add_prop(mut array: Vec<u64>, i: u64, x: u64) -> bool {
         let param = PARAM_MESSAGE_2_CARRY_0;
-        let size = param.message_modulus.0;
+        let size = param.message_modulus.0 as usize;
         let mut ctx = Context::from(param);
         let private_key = key(param);
         let public_key = &private_key.public_key;
@@ -2625,7 +2864,7 @@ mod test {
     #[quickcheck]
     fn test_blind_array_add_quickcheck(mut array: Vec<u64>, i: u64, x: u64) -> TestResult {
         let param = PARAM_MESSAGE_2_CARRY_0;
-        let size = param.message_modulus.0;
+        let size = param.message_modulus.0 as usize;
         if array.len() == 0 {
             return TestResult::discard();
         }
@@ -2925,11 +3164,7 @@ mod test {
 
         let n = ctx.polynomial_size().0;
 
-        let mut mem = GlobalPodBuffer::new(
-            fft.forward_scratch()
-                .unwrap()
-                .and(fft.backward_scratch().unwrap()),
-        );
+        let mut mem = PodBuffer::new(fft.forward_scratch().and(fft.backward_scratch()));
 
         let mut stack = PodStack::new(&mut mem);
 
@@ -2969,7 +3204,14 @@ mod test {
         let mut lut_1 = LUT::from_vec(&vec![0, 1, 2, 3], &private_key, &mut ctx);
         let index_lwe = private_key.allocate_and_encrypt_lwe(3, &mut ctx);
         let start = Instant::now();
-        blind_rotate_assign(&index_lwe, &mut lut_1.0, &public_key.fourier_bsk);
+        blind_rotate_assign(
+            &ms(
+                &public_key.allocate_and_keyswitch_lwe_ciphertext(&index_lwe, &ctx),
+                public_key.fourier_bsk.polynomial_size(),
+            ),
+            &mut lut_1.0,
+            &public_key.fourier_bsk,
+        );
         let end = Instant::now();
         println!(
             "Time taken for blind rotation with encrypted index: {:?}",
@@ -3066,7 +3308,7 @@ mod test {
 
         let lwe = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
         let lut = LUT::from_vec(
-            &Vec::from_iter(0..ctx.message_modulus().0 as u64),
+            &Vec::from_iter(0..ctx.message_modulus().0),
             &private_key,
             &mut ctx,
         );
@@ -3119,7 +3361,7 @@ mod test {
         for _ in 0..num_trials {
             let start = Instant::now();
             let lut = LUT::from_vec_of_lwe(
-                &Vec::from_iter(0..ctx.message_modulus().0 as u64)
+                &Vec::from_iter(0..ctx.message_modulus().0)
                     .into_iter()
                     .map(|x| private_key.allocate_and_encrypt_lwe(x, &mut ctx))
                     .collect::<Vec<_>>(),
@@ -3161,7 +3403,7 @@ mod test {
                 );
 
                 // Decrypt and verify result
-                assert_eq!(decrypted, expected % ctx.message_modulus().0 as u64);
+                assert_eq!(decrypted, expected % ctx.message_modulus().0);
             }
         }
     }
@@ -3172,7 +3414,7 @@ mod test {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let mut vec_to_select = (0..ctx.message_modulus().0 as u64).collect::<Vec<_>>();
+        let mut vec_to_select = (0..ctx.message_modulus().0).collect::<Vec<_>>();
         vec_to_select.shuffle(&mut rand::thread_rng());
 
         let vec_lwe = vec_to_select
@@ -3180,7 +3422,7 @@ mod test {
             .map(|x| private_key.allocate_and_encrypt_lwe(*x, &mut ctx))
             .collect::<Vec<_>>();
 
-        for index_to_select in 0..ctx.message_modulus().0 as u64 {
+        for index_to_select in 0..ctx.message_modulus().0 {
             let mut vec_selector = vec![0u64; ctx.message_modulus().0 as usize];
             vec_selector[index_to_select as usize] = 1;
             let encrypted_selector = vec_selector
@@ -3204,10 +3446,10 @@ mod test {
         let private_key = key(ctx.parameters);
         let public_key = &private_key.public_key;
 
-        let mut data = (0..ctx.message_modulus().0 as u64).collect::<Vec<_>>();
+        let mut data = (0..ctx.message_modulus().0).collect::<Vec<_>>();
         data.shuffle(&mut rand::thread_rng());
 
-        for index_to_select in 0..ctx.message_modulus().0 as u64 {
+        for index_to_select in 0..ctx.message_modulus().0 {
             let mut vec_selector = vec![0u64; ctx.message_modulus().0 as usize];
             vec_selector[index_to_select as usize] = 1;
             let encrypted_selector = vec_selector

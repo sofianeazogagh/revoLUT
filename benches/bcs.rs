@@ -1,9 +1,10 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use revolut::params::*;
 use revolut::{key, random_lut, Context};
 use tfhe::shortint::parameters::*;
 
 fn bench_bcs(c: &mut Criterion, param: ClassicPBSParameters) {
-    let size = param.message_modulus.0;
+    let size = param.message_modulus.0 as usize;
     let bitsize = size.ilog2() as usize;
     let private_key = key(param);
     c.bench_function(&format!("blind counting sort {} bits", bitsize), |b| {

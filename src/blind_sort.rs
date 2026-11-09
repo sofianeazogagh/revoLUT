@@ -162,9 +162,9 @@ impl crate::PublicKey {
 mod tests {
     use std::time::Instant;
 
+    use crate::params::*;
     use crate::*;
     use itertools::sorted;
-    use tfhe::shortint::parameters::*;
 
     #[test]
     fn test_blind_lt() {
@@ -327,7 +327,14 @@ mod tests {
         let input = private_key.allocate_and_encrypt_lwe(1, &mut ctx);
         private_key.debug_glwe("before blind_rotation_assign = ", &lut.0, &ctx);
         let begin = Instant::now();
-        blind_rotate_assign(&input, &mut lut.0, &public_key.fourier_bsk);
+        blind_rotate_assign(
+            &ms(
+                &public_key.allocate_and_keyswitch_lwe_ciphertext(&input, &ctx),
+                public_key.fourier_bsk.polynomial_size(),
+            ),
+            &mut lut.0,
+            &public_key.fourier_bsk,
+        );
         let elapsed = Instant::now() - begin;
         private_key.debug_glwe("after blind_rotation_assign = ", &lut.0, &ctx);
         println!("Time taken by blind_rotation_assign: {:?}", elapsed);

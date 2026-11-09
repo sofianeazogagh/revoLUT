@@ -1,5 +1,5 @@
+use revolut::params::PARAM_MESSAGE_4_CARRY_0;
 use revolut::*;
-use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
 fn main() {
     // Initialize the context

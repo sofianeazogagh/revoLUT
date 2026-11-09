@@ -3,8 +3,8 @@
 
 use std::time::Instant;
 
+use crate::params::*;
 use revolut::{lut::MNLUT, nlwe::NLWE, packed_lut::PackedMNLUT, *};
-use tfhe::shortint::parameters::*;
 
 mod matmul;
 

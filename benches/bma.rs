@@ -1,5 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
-use revolut::{key, Context, random_lut};
+use revolut::params::*;
+use revolut::{key, random_lut, Context};
 use tfhe::shortint::parameters::*;
 
 fn bench_bma(c: &mut Criterion, param: ClassicPBSParameters) {

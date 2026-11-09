@@ -1,6 +1,12 @@
+use revolut::params::PARAM_MESSAGE_4_CARRY_0;
 // Imports and library uses needed for encryption, random generation, I/O, and timing
+use rand::Rng;
 use revolut::{radix::ByteLWE, *};
 use serde::de::value;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::time::Instant;
+use tfhe::core_crypto::prelude::Cleartext;
 use tfhe::core_crypto::prelude::{lwe_ciphertext_cleartext_mul, Plaintext};
 use tfhe::{
     boolean::public_key,
@@ -8,13 +14,7 @@ use tfhe::{
         allocate_and_encrypt_new_lwe_ciphertext, allocate_and_trivially_encrypt_new_lwe_ciphertext,
         blind_rotate_assign, lwe_ciphertext_add, lwe_ciphertext_sub, lwe_keyswitch,
     },
-    shortint::parameters::PARAM_MESSAGE_4_CARRY_0,
 };
-use std::fs::File;
-use std::io::{BufWriter, Write};
-use std::time::Instant;
-use rand::Rng;
-use tfhe::core_crypto::prelude::Cleartext;
 
 // Definition of the BloomFilter struct, holding encrypted tables, the (public) encryption key, and hash matrices
 pub struct BloomFilter {
@@ -40,9 +40,16 @@ impl BloomFilter {
 
         // Fixed example coefficients for hash functions (could be randomized in real system for better security)
         let mut coefficients = [
-            (1, 3, 2), (5, 7, 1), (11, 7, 5), (2, 2, 2),
-            (3, 5, 7), (2, 3, 5), (2, 5, 2), (2, 7, 7),
-            (2, 11, 2), (2, 13, 2)
+            (1, 3, 2),
+            (5, 7, 1),
+            (11, 7, 5),
+            (2, 2, 2),
+            (3, 5, 7),
+            (2, 3, 5),
+            (2, 5, 2),
+            (2, 7, 7),
+            (2, 11, 2),
+            (2, 13, 2),
         ];
 
         // Generate hash matrices for all hash tables
@@ -55,16 +62,16 @@ impl BloomFilter {
                 // Each matrix row is a hash function: h(x, y) = a * x + b * y + c (mod modulus)
                 for j in 0..ctx.full_message_modulus() {
                     row.push(
-                        (coefficients[l].0 * i as u64 + 
-                         coefficients[l].1 * j as u64 + 
-                         coefficients[l].2 as u64) % ctx.full_message_modulus() as u64
+                        (coefficients[l].0 * i as u64
+                            + coefficients[l].1 * j as u64
+                            + coefficients[l].2 as u64)
+                            % ctx.full_message_modulus() as u64,
                     );
                 }
 
                 matrix.push(row);
             }
             hash_matrices.push(matrix);
-
         }
 
         // Construct the BloomFilter instance
@@ -80,7 +87,9 @@ impl BloomFilter {
         // Use the precomputed hash matrix for this hash function
         let hash_matrix = &self.hash_matrices[num - 1];
         // Perform the blind matrix access using FHE to hide the input
-        let result = self.public_key.blind_matrix_access_clear(&hash_matrix, &input.lo, &input.hi, ctx);
+        let result =
+            self.public_key
+                .blind_matrix_access_clear(&hash_matrix, &input.lo, &input.hi, ctx);
         result
     }
 
@@ -95,13 +104,20 @@ impl BloomFilter {
         for i in 0..self.tables.len() {
             let hash = self.hash(input.clone(), i + 1, ctx);
 
-            // Retrieve current value under encryption, then increment it by 1 
-            let mut current_value = self.public_key.blind_array_access(&hash, &self.tables[i], ctx);
+            // Retrieve current value under encryption, then increment it by 1
+            let mut current_value = self
+                .public_key
+                .blind_array_access(&hash, &self.tables[i], ctx);
             let mut current_value_clone = current_value.clone();
             // current_value_clone = current_value + 1
             lwe_ciphertext_sub(&mut current_value_clone, &lwe_one, &current_value);
             // Write incremented value back homomorphically
-            self.public_key.blind_array_increment(&mut self.tables[i], &hash, &current_value_clone, ctx);
+            self.public_key.blind_array_increment(
+                &mut self.tables[i],
+                &hash,
+                &current_value_clone,
+                ctx,
+            );
         }
     }
 
@@ -114,7 +130,9 @@ impl BloomFilter {
         // For each table, check the bit for the input's hash and collect the encrypted values
         for i in 0..self.tables.len() {
             let mut hash = self.hash(input.clone(), i + 1, ctx);
-            let mut value = self.public_key.blind_array_access(&hash, &self.tables[i], ctx);
+            let mut value = self
+                .public_key
+                .blind_array_access(&hash, &self.tables[i], ctx);
             values.push(value);
         }
 
@@ -143,7 +161,6 @@ impl BloomFilter {
     }
 }
 
-
 fn main() {
     // Setup encryption parameters and secret key
     let mut ctx = Context::from(PARAM_MESSAGE_4_CARRY_0);
@@ -158,7 +175,10 @@ fn main() {
     let num_trials = 10;
 
     // Open CSV output file for append (for results logging)
-    let file = File::options().append(true).open("blind_bloom_filter.txt").unwrap();
+    let file = File::options()
+        .append(true)
+        .open("blind_bloom_filter.txt")
+        .unwrap();
     let mut writer = BufWriter::new(file);
 
     // Repeat experiment for each trial (to take averages)
@@ -247,9 +267,17 @@ fn main() {
                 println!("Average lookup time: {:?} ms", avg_lookup_time);
 
                 // Write results as a CSV row to the output file
-                writeln!(writer, "{},{},{},{},{},{},{},{}",
-                    num_elements, num_tables, fp_count, fn_count,
-                    fprate, fnrate, avg_insert_time, avg_lookup_time
+                writeln!(
+                    writer,
+                    "{},{},{},{},{},{},{},{}",
+                    num_elements,
+                    num_tables,
+                    fp_count,
+                    fn_count,
+                    fprate,
+                    fnrate,
+                    avg_insert_time,
+                    avg_lookup_time
                 );
 
                 // Make sure every result is flushed
@@ -258,4 +286,3 @@ fn main() {
         }
     }
 }
-

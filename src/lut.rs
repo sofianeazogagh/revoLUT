@@ -317,8 +317,8 @@ mod tests {
 
     use super::*;
     use crate::key;
+    use crate::params::*;
     use itertools::Itertools;
-    use tfhe::shortint::parameters::*;
 
     #[test]
     pub fn test_blind_tensor_access() {

@@ -114,8 +114,8 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+    use crate::params::PARAM_MESSAGE_4_CARRY_0;
     use revolut::key;
-    use tfhe::shortint::parameters::PARAM_MESSAGE_4_CARRY_0;
 
     use rand::Rng;
 

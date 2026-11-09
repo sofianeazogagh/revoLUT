@@ -1,4 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use revolut::params::*;
 use revolut::{key, random_lut, Context};
 use tfhe::shortint::parameters::*;
 

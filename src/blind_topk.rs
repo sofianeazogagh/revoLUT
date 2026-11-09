@@ -152,8 +152,8 @@ impl crate::PublicKey {
 mod tests {
     use super::*;
     use crate::key;
+    use crate::params::*;
     use std::time::Instant;
-    use tfhe::shortint::parameters::*;
 
     #[test]
     pub fn test_blind_topk() {
